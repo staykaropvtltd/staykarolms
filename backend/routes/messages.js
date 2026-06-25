@@ -24,7 +24,7 @@ router.get("/", authenticate, async (req, res, next) => {
     for (const msg of data || []) {
       const otherId = msg.sender_id === req.user.id ? msg.receiver_id : msg.sender_id;
       const otherProfile = msg.sender_id === req.user.id ? msg.receiver : msg.sender;
-      
+
       if (!threads[otherId]) {
         threads[otherId] = {
           userId: otherId,
@@ -38,7 +38,7 @@ router.get("/", authenticate, async (req, res, next) => {
           messages: [],
         };
       }
-      
+
       threads[otherId].messages.push({
         id: msg.id,
         content: msg.content,
@@ -47,7 +47,7 @@ router.get("/", authenticate, async (req, res, next) => {
         read: msg.read,
         created_at: msg.created_at,
       });
-      
+
       if (!msg.read && msg.receiver_id === req.user.id) {
         threads[otherId].unread++;
       }
@@ -59,6 +59,22 @@ router.get("/", authenticate, async (req, res, next) => {
     });
 
     return res.json({ data: Object.values(threads) });
+  } catch (err) {
+    return next(err);
+  }
+});
+
+// GET /api/messages/unread/count — must be before /:userId to avoid Express shadowing
+router.get("/unread/count", authenticate, async (req, res, next) => {
+  try {
+    const { count, error } = await supabase
+      .from("messages")
+      .select("*", { count: "exact", head: true })
+      .eq("receiver_id", req.user.id)
+      .eq("read", false);
+
+    if (error) return res.status(400).json({ error: error.message });
+    return res.json({ data: { count: count || 0 } });
   } catch (err) {
     return next(err);
   }
@@ -168,22 +184,6 @@ router.put("/:id/read", authenticate, async (req, res, next) => {
 
     if (error) return res.status(400).json({ error: error.message });
     return res.json({ data });
-  } catch (err) {
-    return next(err);
-  }
-});
-
-// GET /api/messages/unread/count — get unread message count
-router.get("/unread/count", authenticate, async (req, res, next) => {
-  try {
-    const { count, error } = await supabase
-      .from("messages")
-      .select("*", { count: "exact", head: true })
-      .eq("receiver_id", req.user.id)
-      .eq("read", false);
-
-    if (error) return res.status(400).json({ error: error.message });
-    return res.json({ data: { count: count || 0 } });
   } catch (err) {
     return next(err);
   }
