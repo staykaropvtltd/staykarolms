@@ -1,11 +1,11 @@
-import { useState, useEffect } from "react";
-import { Bell, Lock, User, Building2, Palette, Save, Loader2 } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import { Bell, Lock, User, Building2, Palette, Save, Loader2, Camera } from "lucide-react";
 import type { UserType } from "@/shared/userTypes";
 import { PageHeader } from "@/shared/components/PageHeader";
 import { Button } from "@/shared/components/ui/button";
 import { toast } from "sonner";
 import { useAuth } from "@/shared/context/AuthContext";
-import { updateUser } from "@/shared/lib/api";
+import { updateUser, uploadCourseFile } from "@/shared/lib/api";
 
 interface SettingsPageProps {
   userType: UserType;
@@ -34,12 +34,15 @@ export function SettingsPage({ userType }: SettingsPageProps) {
   const [tab, setTab] = useState<Tab>("profile");
   const [saved, setSaved] = useState(false);
   const [loading, setLoading] = useState(false);
-  const { user } = useAuth();
-  
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const { user, refreshUser } = useAuth();
+  const photoInputRef = useRef<HTMLInputElement>(null);
+
   const [profileForm, setProfileForm] = useState({
     name: "",
     email: "",
     phone: "",
+    avatar_url: "",
   });
 
   useEffect(() => {
@@ -47,7 +50,8 @@ export function SettingsPage({ userType }: SettingsPageProps) {
       setProfileForm({
         name: user.name || "",
         email: user.email || "",
-        phone: (user as any).phone || "",
+        phone: user.phone || "",
+        avatar_url: user.avatar_url || "",
       });
     }
   }, [user]);
@@ -58,15 +62,32 @@ export function SettingsPage({ userType }: SettingsPageProps) {
     if (!user) return;
     setLoading(true);
     try {
-      await updateUser(user.id, { name: profileForm.name, phone: profileForm.phone });
+      const { error } = await updateUser(user.id, {
+        name: profileForm.name,
+        phone: profileForm.phone,
+        avatar_url: profileForm.avatar_url,
+      });
+      if (error) { toast.error(error); setLoading(false); return; }
+      await refreshUser();
       setSaved(true);
       toast.success("Profile saved successfully!");
       setTimeout(() => setSaved(false), 2000);
-      // Optional: trigger auth context refresh if needed
     } catch (err: any) {
       toast.error(err.message || "Failed to update profile");
     }
     setLoading(false);
+  };
+
+  const handlePhotoChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !user) return;
+    if (file.size > 2 * 1024 * 1024) { toast.error("Image must be under 2 MB"); return; }
+    setUploadingAvatar(true);
+    const { data, error } = await uploadCourseFile(file, "profiles");
+    setUploadingAvatar(false);
+    if (error || !data) { toast.error(error || "Upload failed"); return; }
+    setProfileForm(f => ({ ...f, avatar_url: data.url }));
+    toast.success("Photo ready — click Save profile to apply");
   };
 
   const handleSave = () => {
@@ -106,13 +127,27 @@ export function SettingsPage({ userType }: SettingsPageProps) {
         <div className="flex-1 space-y-6">
           {tab === "profile" && (
             <section className="rounded-xl border border-border bg-card p-6">
-              <h2 className="font-semibold text-foreground mb-5 flex items-center gap-2"><User className="w-4 h-4 text-[var(--gold)]" /> Profile</h2>
+              <h2 className="font-semibold text-foreground mb-5 flex items-center gap-2"><User className="w-4 h-4" style={{ color: "var(--gold)" }} /> Profile</h2>
               <div className="flex items-center gap-4 mb-6">
-                <div className="w-16 h-16 rounded-full flex items-center justify-center text-[#1A1A1A] text-xl font-bold" style={{ background: "var(--gold)" }}>
-                  {getInitials(user?.name || "")}
+                <div className="relative w-16 h-16 shrink-0">
+                  {profileForm.avatar_url ? (
+                    <img src={profileForm.avatar_url} alt="avatar" className="w-16 h-16 rounded-full object-cover" />
+                  ) : (
+                    <div className="w-16 h-16 rounded-full flex items-center justify-center text-[#1A1A1A] text-xl font-bold" style={{ background: "var(--gold)" }}>
+                      {getInitials(user?.name || "")}
+                    </div>
+                  )}
+                  {uploadingAvatar && (
+                    <div className="absolute inset-0 rounded-full bg-black/40 flex items-center justify-center">
+                      <Loader2 className="w-5 h-5 animate-spin text-white" />
+                    </div>
+                  )}
                 </div>
                 <div>
-                  <Button variant="outline" size="sm">Change photo</Button>
+                  <input ref={photoInputRef} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={handlePhotoChange} />
+                  <Button variant="outline" size="sm" className="gap-2" onClick={() => photoInputRef.current?.click()} disabled={uploadingAvatar}>
+                    <Camera className="w-3.5 h-3.5" /> {uploadingAvatar ? "Uploading…" : "Change photo"}
+                  </Button>
                   <p className="text-xs text-muted-foreground mt-1">JPG, PNG up to 2MB</p>
                 </div>
               </div>
@@ -162,7 +197,7 @@ export function SettingsPage({ userType }: SettingsPageProps) {
 
           {tab === "notifications" && (
             <section className="rounded-xl border border-border bg-card p-6">
-              <h2 className="font-semibold text-foreground mb-5 flex items-center gap-2"><Bell className="w-4 h-4 text-[var(--gold)]" /> Notification Preferences</h2>
+              <h2 className="font-semibold text-foreground mb-5 flex items-center gap-2"><Bell className="w-4 h-4" style={{ color: "var(--gold)" }} /> Notification Preferences</h2>
               <div className="space-y-0 divide-y divide-border">
                 {NOTIFICATION_PREFS.map(pref => (
                   <label key={pref.key} className="flex items-center justify-between gap-4 py-4 cursor-pointer">
@@ -182,7 +217,7 @@ export function SettingsPage({ userType }: SettingsPageProps) {
 
           {tab === "security" && (
             <section className="rounded-xl border border-border bg-card p-6">
-              <h2 className="font-semibold text-foreground mb-5 flex items-center gap-2"><Lock className="w-4 h-4 text-[var(--gold)]" /> Security</h2>
+              <h2 className="font-semibold text-foreground mb-5 flex items-center gap-2"><Lock className="w-4 h-4" style={{ color: "var(--gold)" }} /> Security</h2>
               <div className="space-y-4">
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div>
@@ -226,7 +261,7 @@ export function SettingsPage({ userType }: SettingsPageProps) {
 
           {tab === "institution" && isAdmin && (
             <section className="rounded-xl border border-border bg-card p-6">
-              <h2 className="font-semibold text-foreground mb-5 flex items-center gap-2"><Building2 className="w-4 h-4 text-[var(--gold)]" /> Institution Settings</h2>
+              <h2 className="font-semibold text-foreground mb-5 flex items-center gap-2"><Building2 className="w-4 h-4" style={{ color: "var(--gold)" }} /> Institution Settings</h2>
               <div className="grid gap-4 sm:grid-cols-2">
                 <div>
                   <label className="text-xs font-medium text-muted-foreground">Institution name</label>
@@ -272,7 +307,7 @@ export function SettingsPage({ userType }: SettingsPageProps) {
 
           {tab === "appearance" && (
             <section className="rounded-xl border border-border bg-card p-6">
-              <h2 className="font-semibold text-foreground mb-5 flex items-center gap-2"><Palette className="w-4 h-4 text-[var(--gold)]" /> Appearance</h2>
+              <h2 className="font-semibold text-foreground mb-5 flex items-center gap-2"><Palette className="w-4 h-4" style={{ color: "var(--gold)" }} /> Appearance</h2>
               <div className="space-y-5">
                 <div>
                   <label className="text-xs font-medium text-muted-foreground block mb-2">Theme</label>

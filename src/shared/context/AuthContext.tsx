@@ -10,6 +10,7 @@ export interface AuthUser {
   name: string;
   email: string;
   avatar_url?: string;
+  phone?: string;
   institution_id?: string;
 }
 
@@ -17,6 +18,7 @@ interface AuthContextValue {
   user: AuthUser | null;
   login: (email: string, password: string) => Promise<AuthUser | null>;
   logout: () => Promise<void>;
+  refreshUser: () => Promise<void>;
   isAuthenticated: boolean;
   isLoading: boolean;
 }
@@ -59,6 +61,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             name: data.name,
             email: data.email,
             avatar_url: data.avatar_url || "",
+            phone: data.phone || undefined,
             institution_id: data.institution_id,
           };
           setUser(u);
@@ -162,8 +165,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const refreshUser = async () => {
+    await fetchProfile();
+  };
+
   return (
-    <AuthContext.Provider value={{ user, login, logout, isAuthenticated: !!user, isLoading }}>
+    <AuthContext.Provider value={{ user, login, logout, refreshUser, isAuthenticated: !!user, isLoading }}>
       {isLoading ? (
         <div className="flex h-screen w-screen items-center justify-center bg-background">
           <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2" style={{ borderColor: "var(--gold)" }}></div>
