@@ -1,0 +1,212 @@
+const router = require("express").Router();
+const supabase = require("../lib/supabase");
+const authenticate = require("../middleware/auth");
+const { requireRole } = require("../middleware/roleGuard");
+
+// POST /api/attempts/start — student starts a test
+router.post("/start", authenticate, requireRole("student"), async (req, res, next) => {
+  const { test_id } = req.body;
+
+  if (!test_id) return res.status(400).json({ error: "test_id is required" });
+
+  try {
+    const { data: test, error: testError } = await supabase
+      .from("tests")
+      .select("id, institution_id, status")
+      .eq("id", test_id)
+      .single();
+
+    if (testError || !test) return res.status(404).json({ error: "Test not found" });
+
+    if (req.user.role !== "super-admin" && test.institution_id !== req.user.institution_id) {
+      return res.status(404).json({ error: "Test not found" });
+    }
+
+    if (test.status !== "published") {
+      return res.status(403).json({ error: "Test is not available for attempts" });
+    }
+
+    // Check if already in progress
+    const { data: existing } = await supabase
+      .from("test_attempts")
+      .select("id, status")
+      .eq("test_id", test_id)
+      .eq("student_id", req.user.id)
+      .eq("status", "in_progress")
+      .maybeSingle();
+
+    if (existing) {
+      return res.json({ data: existing });
+    }
+
+    const { data, error } = await supabase
+      .from("test_attempts")
+      .insert({ test_id, student_id: req.user.id })
+      .select()
+      .single();
+
+    if (error) return res.status(400).json({ error: error.message });
+    return res.status(201).json({ data });
+  } catch (err) {
+    return next(err);
+  }
+});
+
+// POST /api/attempts/:id/answer — save one answer
+router.post("/:id/answer", authenticate, requireRole("student"), async (req, res, next) => {
+  const { question_id, answer } = req.body;
+
+  if (!question_id) return res.status(400).json({ error: "question_id is required" });
+
+  try {
+    const { data: attempt, error: attemptError } = await supabase
+      .from("test_attempts")
+      .select("id, student_id, status, test_id")
+      .eq("id", req.params.id)
+      .eq("student_id", req.user.id)
+      .single();
+
+    if (attemptError || !attempt) {
+      return res.status(404).json({ error: "Attempt not found" });
+    }
+
+    if (attempt.status !== "in_progress") {
+      return res.status(400).json({ error: "Attempt is not in progress" });
+    }
+
+    const { data, error } = await supabase
+      .from("test_answers")
+      .upsert(
+        { attempt_id: req.params.id, question_id, answer },
+        { onConflict: "attempt_id,question_id" }
+      )
+      .select()
+      .single();
+
+    if (error) return res.status(400).json({ error: error.message });
+    return res.json({ data });
+  } catch (err) {
+    return next(err);
+  }
+});
+
+// POST /api/attempts/:id/submit — finalize attempt, auto-grade MCQ
+router.post("/:id/submit", authenticate, requireRole("student"), async (req, res, next) => {
+  const attemptId = req.params.id;
+
+  try {
+    const { data: attempt, error: attemptError } = await supabase
+      .from("test_attempts")
+      .select("id, student_id, status, started_at, test_id")
+      .eq("id", attemptId)
+      .eq("student_id", req.user.id)
+      .single();
+
+    if (attemptError || !attempt) {
+      return res.status(404).json({ error: "Attempt not found" });
+    }
+
+    if (attempt.status !== "in_progress") {
+      return res.status(400).json({ error: "Attempt is not in progress" });
+    }
+
+    // Server-side time enforcement — reject if student held the attempt open past the deadline.
+    // 2-minute grace period absorbs clock skew and slow final submissions.
+    const { data: test } = await supabase
+      .from("tests")
+      .select("duration_mins")
+      .eq("id", attempt.test_id)
+      .single();
+
+    if (test?.duration_mins) {
+      const elapsedMins = (Date.now() - new Date(attempt.started_at).getTime()) / 60000;
+      if (elapsedMins > test.duration_mins + 2) {
+        return res.status(403).json({ error: "Test time has expired" });
+      }
+    }
+
+    // Get all answers + questions for this attempt
+    const { data: answers, error: answersError } = await supabase
+      .from("test_answers")
+      .select("*, test_questions(*)")
+      .eq("attempt_id", attemptId);
+
+    if (answersError) return res.status(400).json({ error: answersError.message });
+
+    let totalScore = 0;
+    const updates = [];
+
+    for (const ans of answers) {
+      const question = ans.test_questions;
+      let isCorrect = false;
+      let marksAwarded = 0;
+
+      if (question.type === "mcq" && question.correct_answer) {
+        isCorrect = ans.answer?.trim() === question.correct_answer?.trim();
+        marksAwarded = isCorrect ? question.marks : 0;
+      }
+
+      totalScore += marksAwarded;
+      updates.push(
+        supabase
+          .from("test_answers")
+          .update({ is_correct: isCorrect, marks_awarded: marksAwarded })
+          .eq("id", ans.id)
+      );
+    }
+
+    // Execute all answer updates
+    await Promise.all(updates);
+
+    // Finalize attempt
+    const { data, error } = await supabase
+      .from("test_attempts")
+      .update({
+        status: "submitted",
+        submitted_at: new Date().toISOString(),
+        score: totalScore,
+      })
+      .eq("id", attemptId)
+      .select()
+      .single();
+
+    if (error) return res.status(400).json({ error: error.message });
+    return res.json({ data: { ...data, score: totalScore } });
+  } catch (err) {
+    return next(err);
+  }
+});
+
+// GET /api/attempts/:id/result — full result breakdown
+router.get("/:id/result", authenticate, async (req, res, next) => {
+  try {
+    const { data: attempt, error: attemptError } = await supabase
+      .from("test_attempts")
+      .select(`
+        *,
+        tests:test_id ( title, type, duration_mins ),
+        test_answers (
+          *,
+          test_questions ( question, type, correct_answer, marks, options )
+        )
+      `)
+      .eq("id", req.params.id)
+      .single();
+
+    if (attemptError) return res.status(404).json({ error: "Attempt not found" });
+
+    // Security: only the student or admin/faculty can see results
+    if (
+      req.user.role === "student" &&
+      attempt.student_id !== req.user.id
+    ) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
+    return res.json({ data: attempt });
+  } catch (err) {
+    return next(err);
+  }
+});
+
+module.exports = router;

@@ -1,0 +1,24 @@
+services:
+  - type: web
+    name: staykaro-api
+    env: node
+    rootDir: backend
+    region: singapore          # closest to ap-south-1 Supabase region
+    plan: standard             # 1 CPU, 2 GB RAM — minimum for 500 users
+    buildCommand: npm install --omit=dev
+    startCommand: npx pm2-runtime start ecosystem.config.js --env production
+    healthCheckPath: /api/health
+
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000           # Render always passes PORT; server.js reads it
+      - key: SUPABASE_URL
+        sync: false            # fill in Render dashboard — never commit this
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
+      - key: FRONTEND_URL
+        value: https://staykarolms-six.vercel.app
+      - key: REDIS_URL
+        sync: false            # optional — leave blank to skip Redis

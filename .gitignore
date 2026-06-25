@@ -1,0 +1,24 @@
+node_modules
+dist
+
+# Environment files — NEVER commit these
+.env
+.env.*
+*.env
+backend/.env
+backend/.env.*
+
+# Local overrides
+*.local
+
+# Build output
+backend/node_modules
+
+# Claude Code local config
+.claude/settings.local.json
+
+# Audit docs (internal only)
+*.docx
+
+# PM2 logs
+backend/logs/
