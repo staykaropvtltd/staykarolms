@@ -32,7 +32,7 @@ router.get("/:id", authenticate, requireRole("admin", "faculty", "super-admin"),
     let query = supabase
       .from("profiles")
       .select(`
-        id, name, email, role, institution_id, avatar_url, phone, created_at,
+        id, name, email, role, institution_id, avatar_url, created_at,
         batch_students(
           batch_id,
           batches:batch_id(id, name, status, start_date, end_date)
@@ -171,13 +171,12 @@ router.put("/:id", authenticate, async (req, res, next) => {
     return res.status(403).json({ error: "Forbidden" });
   }
 
-  const { name, avatar_url, phone, status } = req.body;
+  const { name, avatar_url, status } = req.body;
 
   try {
     const updates = {};
     if (name !== undefined) updates.name = name;
     if (avatar_url !== undefined) updates.avatar_url = avatar_url;
-    if (phone !== undefined) updates.phone = phone;
     if (status !== undefined) updates.status = status;
 
     const { data, error } = await supabase

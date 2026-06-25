@@ -24,7 +24,7 @@ async function authenticate(req, res, next) {
     // Fetch the profile from our profiles table to get role + institution_id
     const { data: profile, error: profileError } = await supabase
       .from("profiles")
-      .select("id, name, email, role, institution_id, avatar_url, phone")
+      .select("id, name, email, role, institution_id, avatar_url")
       .eq("id", user.id)
       .single();
 

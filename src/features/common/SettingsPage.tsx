@@ -64,7 +64,6 @@ export function SettingsPage({ userType }: SettingsPageProps) {
     try {
       const { error } = await updateUser(user.id, {
         name: profileForm.name,
-        phone: profileForm.phone,
         avatar_url: profileForm.avatar_url,
       });
       if (error) { toast.error(error); setLoading(false); return; }
