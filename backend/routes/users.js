@@ -27,7 +27,7 @@ router.get("/", authenticate, async (req, res, next) => {
 });
 
 // GET /api/users/:id — single user profile with batch memberships
-router.get("/:id", authenticate, requireRole("admin", "super-admin"), async (req, res, next) => {
+router.get("/:id", authenticate, requireRole("admin", "faculty", "super-admin"), async (req, res, next) => {
   try {
     let query = supabase
       .from("profiles")
@@ -52,11 +52,11 @@ router.get("/:id", authenticate, requireRole("admin", "super-admin"), async (req
   }
 });
 
-// POST /api/users — create single user (admin/super-admin)
+// POST /api/users — create single user (admin/faculty/super-admin)
 router.post(
   "/",
   authenticate,
-  requireRole("admin", "super-admin"),
+  requireRole("admin", "faculty", "super-admin"),
   async (req, res, next) => {
     const { email, password, name, role, institution_id } = req.body;
 
@@ -94,11 +94,11 @@ router.post(
   }
 );
 
-// POST /api/users/bulk — bulk create students from CSV (admin/super-admin)
+// POST /api/users/bulk — bulk create students from CSV (admin/faculty/super-admin)
 router.post(
   "/bulk",
   authenticate,
-  requireRole("admin", "super-admin"),
+  requireRole("admin", "faculty", "super-admin"),
   async (req, res, next) => {
     const { students, default_password } = req.body;
 
@@ -162,22 +162,23 @@ router.post(
   }
 );
 
-// PUT /api/users/:id — update user profile (own or admin)
+// PUT /api/users/:id — update user profile (own or admin/faculty)
 router.put("/:id", authenticate, async (req, res, next) => {
   if (
     req.user.id !== req.params.id &&
-    !["admin", "super-admin"].includes(req.user.role)
+    !["admin", "faculty", "super-admin"].includes(req.user.role)
   ) {
     return res.status(403).json({ error: "Forbidden" });
   }
 
-  const { name, avatar_url, phone } = req.body;
+  const { name, avatar_url, phone, status } = req.body;
 
   try {
     const updates = {};
     if (name !== undefined) updates.name = name;
     if (avatar_url !== undefined) updates.avatar_url = avatar_url;
     if (phone !== undefined) updates.phone = phone;
+    if (status !== undefined) updates.status = status;
 
     const { data, error } = await supabase
       .from("profiles")

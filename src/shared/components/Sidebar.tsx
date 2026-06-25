@@ -54,6 +54,7 @@ const adminMenu: MenuItem[] = [
 const facultyMenu: MenuItem[] = [
   { path: "dashboard",           label: "Dashboard",           icon: LayoutDashboard },
   { path: "my-courses",          label: "My Courses",          icon: BookOpen },
+  { path: "students",            label: "Students",            icon: Users },
   { path: "student-performance", label: "Student Performance", icon: TrendingUp },
   { path: "assignment-review",   label: "Assignment Reviews",  icon: ClipboardCheck },
   { path: "course-content",      label: "Course Content",      icon: Upload },
@@ -68,6 +69,7 @@ const facultyMenu: MenuItem[] = [
 
 const studentMenu: MenuItem[] = [
   { path: "dashboard",      label: "Dashboard",       icon: LayoutDashboard },
+  { path: "courses",        label: "Explore Courses", icon: Globe },
   { path: "my-courses",     label: "My Learning",     icon: BookOpen },
   { path: "progress",       label: "My Progress",     icon: TrendingUp },
   { path: "assignments",    label: "Assignments",     icon: FileText },

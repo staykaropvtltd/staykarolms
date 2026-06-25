@@ -45,6 +45,7 @@ import { FacultyAnalyticsPage } from "@/features/faculty/FacultyAnalyticsPage";
 
 // Student pages (learner)
 import { MyCoursesPage } from "@/features/student/MyCoursesPage";
+import { CourseCatalogPage } from "@/features/student/CourseCatalogPage";
 import { ProgressPage } from "@/features/student/ProgressPage";
 import { CodeEditorPage } from "@/features/student/CodeEditorPage";
 import { CodingTestPage } from "@/features/student/CodingTestPage";
@@ -143,6 +144,7 @@ export const router = createBrowserRouter([
           { index: true,                  element: <Navigate to="dashboard" replace /> },
           { path: "dashboard",            element: <FacultyDashboard /> },
           { path: "my-courses",           element: <FacultyMyCoursesPage /> },
+          { path: "students",             element: <StudentsPage userType="faculty" /> },
           { path: "student-performance",  element: <StudentPerformancePage /> },
           { path: "assignment-review",    element: <AssignmentReviewPage /> },
           { path: "course-content",       element: <CourseContentPage /> },
@@ -169,6 +171,7 @@ export const router = createBrowserRouter([
         children: [
           { index: true,                element: <Navigate to="dashboard" replace /> },
           { path: "dashboard",          element: <StudentDashboard /> },
+          { path: "courses",            element: <CourseCatalogPage /> },
           { path: "my-courses",         element: <MyCoursesPage /> },
           { path: "progress",           element: <ProgressPage /> },
           { path: "assignments",        element: <AssignmentsPage userType="student" /> },

@@ -292,7 +292,8 @@ function StudentDetailModal({
   studentId,
   onClose,
   onUpdated,
-}: { studentId: string; onClose: () => void; onUpdated: () => void }) {
+  canDelete = true,
+}: { studentId: string; onClose: () => void; onUpdated: () => void; canDelete?: boolean }) {
   const [student, setStudent] = useState<StudentDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
@@ -485,25 +486,27 @@ function StudentDetailModal({
                 )}
               </div>
 
-              {/* Danger zone */}
-              <div className="border border-red-500/20 rounded-lg p-4 bg-red-500/5">
-                <h4 className="text-sm font-semibold text-red-500 mb-1">Danger Zone</h4>
-                <p className="text-xs text-muted-foreground mb-3">Permanently removes this student from the platform. This cannot be undone.</p>
-                {!confirmDelete ? (
-                  <Button variant="outline" size="sm" className="text-red-500 border-red-500/30 hover:bg-red-500/10"
-                    onClick={() => setConfirmDelete(true)}>
-                    <Trash2 className="w-3.5 h-3.5 mr-1.5" /> Remove Student
-                  </Button>
-                ) : (
-                  <div className="flex items-center gap-2">
-                    <p className="text-xs text-red-500 font-medium">Are you sure?</p>
-                    <Button size="sm" className="bg-red-500 hover:bg-red-600 text-white" onClick={handleDelete} disabled={deleting}>
-                      {deleting ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" /> : null} Yes, remove
+              {/* Danger zone — admin only */}
+              {canDelete && (
+                <div className="border border-red-500/20 rounded-lg p-4 bg-red-500/5">
+                  <h4 className="text-sm font-semibold text-red-500 mb-1">Danger Zone</h4>
+                  <p className="text-xs text-muted-foreground mb-3">Permanently removes this student from the platform. This cannot be undone.</p>
+                  {!confirmDelete ? (
+                    <Button variant="outline" size="sm" className="text-red-500 border-red-500/30 hover:bg-red-500/10"
+                      onClick={() => setConfirmDelete(true)}>
+                      <Trash2 className="w-3.5 h-3.5 mr-1.5" /> Remove Student
                     </Button>
-                    <Button size="sm" variant="ghost" onClick={() => setConfirmDelete(false)}>Cancel</Button>
-                  </div>
-                )}
-              </div>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <p className="text-xs text-red-500 font-medium">Are you sure?</p>
+                      <Button size="sm" className="bg-red-500 hover:bg-red-600 text-white" onClick={handleDelete} disabled={deleting}>
+                        {deleting ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" /> : null} Yes, remove
+                      </Button>
+                      <Button size="sm" variant="ghost" onClick={() => setConfirmDelete(false)}>Cancel</Button>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           ) : null}
         </div>
@@ -577,6 +580,7 @@ export function StudentsPage({ userType }: StudentsPageProps) {
           studentId={selectedId}
           onClose={() => setSelectedId(null)}
           onUpdated={fetchStudents}
+          canDelete={isAdmin}
         />
       )}
 
@@ -584,16 +588,16 @@ export function StudentsPage({ userType }: StudentsPageProps) {
         title="Students"
         description={isAdmin ? "Manage all learners enrolled in your institution." : "Rosters for the courses you instruct."}
         actions={
-          isAdmin ? (
-            <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2">
+            {isAdmin && (
               <Button size="sm" variant="outline" className="gap-2" onClick={() => setShowCSV(true)}>
                 <FileText className="size-4" /> Import CSV
               </Button>
-              <Button size="sm" className="gap-2" onClick={() => setShowAdd(true)}>
-                <UserPlus className="size-4" /> Add Student
-              </Button>
-            </div>
-          ) : null
+            )}
+            <Button size="sm" className="gap-2" onClick={() => setShowAdd(true)}>
+              <UserPlus className="size-4" /> Add Student
+            </Button>
+          </div>
         }
       />
 

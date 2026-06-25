@@ -156,6 +156,8 @@ export const deleteUser = (id: string) =>
 
 export const getCourses = () => apiFetch("/api/courses");
 
+export const getAvailableCourses = () => apiFetch("/api/courses?available=true");
+
 export const createCourse = (payload: {
   title: string;
   description?: string;

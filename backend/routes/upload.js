@@ -89,7 +89,7 @@ router.post("/", authenticate, async (req, res, next) => {
     const bucketExists = buckets?.some((b) => b.name === bucketName);
     if (!bucketExists) {
       await supabase.storage.createBucket(bucketName, {
-        public: bucketName === "profiles" || bucketName === "uploads", // make profiles/uploads public, other private
+        public: ["profiles", "uploads", "course-content"].includes(bucketName),
         fileSizeLimit: 52428800, // 50MB
       });
     }

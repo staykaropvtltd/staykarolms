@@ -56,11 +56,11 @@ function CourseCard({ course, onSelect, selected }: { course: EnrolledCourse; on
           <p className="font-semibold text-foreground text-sm truncate">{course.title}</p>
           <p className="text-xs text-muted-foreground">{course.completedLessons}/{course.totalLessons} lessons</p>
         </div>
-        <span className={`text-sm font-bold tabular-nums ${course.progress >= 90 ? "text-[var(--gold)]" : "text-[var(--gold)]"}`}>{course.progress}%</span>
+        <span className="text-sm font-bold tabular-nums" style={{ color: "var(--gold)" }}>{course.progress}%</span>
       </div>
       <div className="mt-2 h-1.5 bg-muted rounded-full overflow-hidden">
         <div
-          className={`h-full rounded-full ${course.progress >= 90 ? "bg-primary" : "[var(--gold)]"}`}
+          className="h-full rounded-full bg-primary"
           style={{ width: `${course.progress}%` }}
         />
       </div>
@@ -110,7 +110,6 @@ function VideoPlayer({ lesson }: { lesson: CourseLesson | null }) {
               rel="noopener noreferrer"
               className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-colors"
               style={{ background: "var(--gold)", color: "#1A1A1A" }}
-              onClick={() => console.log("[STUDENT VIEW] Opening PDF/file URL:", lesson.url)}
             >
               <ExternalLink className="w-4 h-4" />
               {isPdfOrDoc ? "Open PDF" : "Open File"}
@@ -119,7 +118,6 @@ function VideoPlayer({ lesson }: { lesson: CourseLesson | null }) {
               href={lesson.url}
               download
               className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl border border-border text-sm font-semibold text-foreground hover:bg-accent/30 transition-colors"
-              onClick={() => console.log("[STUDENT VIEW] Downloading file URL:", lesson.url)}
             >
               <Download className="w-4 h-4" /> Download
             </a>
@@ -142,12 +140,11 @@ function VideoPlayer({ lesson }: { lesson: CourseLesson | null }) {
       className="aspect-video bg-[#0d1117] rounded-xl flex flex-col items-center justify-center border border-border relative overflow-hidden group cursor-pointer"
       onClick={() => {
         if (lesson.url) {
-          console.log("[STUDENT VIEW] Opening video URL:", lesson.url);
           window.open(lesson.url, "_blank", "noopener,noreferrer");
         }
       }}
     >
-      <div className="absolute inset-0 bg-gradient-to-br [var(--gold-muted)]" />
+      <div className="absolute inset-0 opacity-20" style={{ background: "var(--gold)" }} />
       <div className="relative z-10 flex flex-col items-center gap-3">
         <div className="w-16 h-16 rounded-full bg-white/10 backdrop-blur flex items-center justify-center group-hover:bg-white/20 transition-colors">
           <Play className="w-7 h-7 text-white ml-1" />
@@ -157,7 +154,7 @@ function VideoPlayer({ lesson }: { lesson: CourseLesson | null }) {
         {lesson.url && <p className="text-white/40 text-xs">Click to open video</p>}
       </div>
       {lesson.completed && (
-        <div className="absolute top-3 right-3 flex items-center gap-1 [var(--gold-muted)] text-[var(--gold)] text-xs px-2 py-1 rounded-full">
+        <div className="absolute top-3 right-3 flex items-center gap-1 text-xs px-2 py-1 rounded-full" style={{ background: "var(--gold-muted)", color: "var(--gold)" }}>
           <CheckCircle className="w-3 h-3" /> Completed
         </div>
       )}
@@ -417,12 +414,12 @@ export function MyCoursesPage() {
             </div>
             <div className="mt-3 flex items-center gap-3">
               <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
-                <div className={`h-full rounded-full transition-all duration-700 ${selectedCourse!.progress >= 90 ? "bg-primary" : "[var(--gold)]"}`} style={{ width: `${selectedCourse!.progress}%` }} />
+                <div className="h-full rounded-full transition-all duration-700 bg-primary" style={{ width: `${selectedCourse!.progress}%` }} />
               </div>
               <span className="text-sm text-muted-foreground tabular-nums">{selectedCourse!.completedLessons}/{selectedCourse!.totalLessons} lessons</span>
             </div>
             {selectedCourse!.progress >= 90 && (
-              <div className="mt-3 flex items-center gap-2 p-3 [var(--gold-muted)] border border-[var(--gold)]/30 rounded-lg">
+              <div className="mt-3 flex items-center gap-2 p-3 border rounded-lg" style={{ background: "var(--gold-muted)", borderColor: "color-mix(in srgb, var(--gold) 30%, transparent)" }}>
                 <CheckCircle className="w-4 h-4 shrink-0" style={{ color: "var(--gold)" }} />
                 <p className="text-sm text-[var(--gold)] font-medium">Almost there! Complete the final lesson to earn your certificate 🎓</p>
               </div>

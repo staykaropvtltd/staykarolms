@@ -346,6 +346,16 @@ router.get("/", authenticate, async (req, res, next) => {
 
     if (req.user.role === "student") {
       query = query.eq("student_id", req.user.id);
+    } else if (req.user.role !== "super-admin") {
+      // Admin and faculty see only their institution's students' certificates
+      const { data: institutionStudents } = await supabase
+        .from("profiles")
+        .select("id")
+        .eq("institution_id", req.user.institution_id)
+        .eq("role", "student");
+      const studentIds = (institutionStudents || []).map((s) => s.id);
+      if (studentIds.length === 0) return res.json({ data: [] });
+      query = query.in("student_id", studentIds);
     }
 
     const { data, error } = await query.order("issued_at", { ascending: false });

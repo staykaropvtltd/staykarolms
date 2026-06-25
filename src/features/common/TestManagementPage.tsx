@@ -13,10 +13,13 @@ type Tab = "all" | "create";
 
 export function TestManagementPage({ userType }: TestManagementPageProps) {
   const [activeTab, setActiveTab] = useState<Tab>("all");
-  
-  // Wizard State
   const [step, setStep] = useState(1);
-  
+
+  const handleCreated = () => {
+    setActiveTab("all");
+    setStep(1);
+  };
+
   return (
     <div className="p-6 md:p-8 max-w-7xl mx-auto">
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-8">
@@ -65,7 +68,7 @@ export function TestManagementPage({ userType }: TestManagementPageProps) {
             exit={{ opacity: 0, y: -10 }}
             transition={{ duration: 0.2 }}
           >
-            <CreateTestTab step={step} setStep={setStep} />
+            <CreateTestTab step={step} setStep={setStep} onCreated={handleCreated} />
           </motion.div>
         )}
       </AnimatePresence>
@@ -213,7 +216,7 @@ function AllTestsTab() {
 
 // ── Create Test Wizard ─────────────────────────────────────────────────────
 
-function CreateTestTab({ step, setStep }: { step: number; setStep: (s: number) => void }) {
+function CreateTestTab({ step, setStep, onCreated }: { step: number; setStep: (s: number) => void; onCreated?: () => void }) {
   const [formData, setFormData] = useState({
     title: "",
     type: "coding",
@@ -221,9 +224,10 @@ function CreateTestTab({ step, setStep }: { step: number; setStep: (s: number) =
     duration_mins: 60,
     scheduled_at: "",
   });
-  
+
   const [questions, setQuestions] = useState<any[]>([]);
   const [publishing, setPublishing] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [batches, setBatches] = useState<any[]>([]);
 
   useEffect(() => {
@@ -232,47 +236,53 @@ function CreateTestTab({ step, setStep }: { step: number; setStep: (s: number) =
 
   const handleNext = () => setStep(Math.min(step + 1, 3));
   const handlePrev = () => setStep(Math.max(step - 1, 1));
-  
+
+  const createTestWithQuestions = async () => {
+    const { data: testData, error: testError } = await createTest({
+      title: formData.title,
+      type: formData.type as "coding" | "aptitude" | "mock",
+      batch_id: formData.batch_id || undefined,
+      duration_mins: formData.duration_mins,
+      scheduled_at: formData.scheduled_at || undefined,
+    });
+    if (testError || !testData) throw new Error(testError || "Failed to create test");
+    for (const q of questions) {
+      const { error: qError } = await addTestQuestion(testData.id, {
+        question: q.question,
+        type: q.type as "mcq" | "coding" | "short",
+        options: q.type === "mcq" ? q.options : undefined,
+        correct_answer: q.type === "mcq" ? q.correct_answer : undefined,
+        marks: q.marks,
+        order_index: questions.indexOf(q),
+      });
+      if (qError) toast.error(`Failed to add question: ${qError}`);
+    }
+    return testData;
+  };
+
   const handlePublish = async () => {
     setPublishing(true);
     try {
-      // Step 1: Create the test
-      const { data: testData, error: testError } = await createTest({
-        title: formData.title,
-        type: formData.type as "coding" | "aptitude" | "mock",
-        batch_id: formData.batch_id || undefined,
-        duration_mins: formData.duration_mins,
-        scheduled_at: formData.scheduled_at || undefined,
-      });
-      if (testError || !testData) {
-        toast.error(testError || "Failed to create test");
-        setPublishing(false);
-        return;
-      }
-      // Step 2: Add questions
-      for (const q of questions) {
-        const { error: qError } = await addTestQuestion(testData.id, {
-          question: q.question,
-          type: q.type as "mcq" | "coding" | "short",
-          options: q.type === "mcq" ? q.options : undefined,
-          correct_answer: q.type === "mcq" ? q.correct_answer : undefined,
-          marks: q.marks,
-          order_index: questions.indexOf(q),
-        });
-        if (qError) {
-          toast.error(`Failed to add question: ${qError}`);
-        }
-      }
-      // Step 3: Publish
+      const testData = await createTestWithQuestions();
       await publishTest(testData.id);
       toast.success("Test created and published!");
-      setStep(1);
-      setFormData({ title: "", type: "coding", batch_id: "", duration_mins: 60, scheduled_at: "" });
-      setQuestions([]);
+      onCreated?.();
     } catch (err: any) {
       toast.error(err.message || "Failed to create test");
     }
     setPublishing(false);
+  };
+
+  const handleSaveDraft = async () => {
+    setSaving(true);
+    try {
+      await createTestWithQuestions();
+      toast.success("Test saved as draft!");
+      onCreated?.();
+    } catch (err: any) {
+      toast.error(err.message || "Failed to save draft");
+    }
+    setSaving(false);
   };
 
   return (
@@ -307,7 +317,7 @@ function CreateTestTab({ step, setStep }: { step: number; setStep: (s: number) =
           <Step2Questions questions={questions} setQuestions={setQuestions} onNext={handleNext} onPrev={handlePrev} />
         )}
         {step === 3 && (
-          <Step3Review formData={formData} questions={questions} onPublish={handlePublish} onPrev={handlePrev} />
+          <Step3Review formData={formData} questions={questions} onPublish={handlePublish} onSaveDraft={handleSaveDraft} onPrev={handlePrev} publishing={publishing} saving={saving} />
         )}
       </div>
     </div>
@@ -573,7 +583,7 @@ function Step2Questions({ questions, setQuestions, onNext, onPrev }: any) {
   );
 }
 
-function Step3Review({ formData, questions, onPublish, onPrev }: any) {
+function Step3Review({ formData, questions, onPublish, onSaveDraft, onPrev, publishing, saving }: any) {
   const totalMarks = questions.reduce((sum: number, q: any) => sum + q.marks, 0);
 
   return (
@@ -615,18 +625,24 @@ function Step3Review({ formData, questions, onPublish, onPrev }: any) {
       </div>
 
       <div className="flex justify-between pt-6 border-t">
-        <button onClick={onPrev} className="px-6 py-2.5 font-bold hover:bg-muted rounded-xl transition-colors">
+        <button onClick={onPrev} disabled={publishing || saving} className="px-6 py-2.5 font-bold hover:bg-muted rounded-xl transition-colors disabled:opacity-50">
           Back
         </button>
         <div className="flex gap-3">
-          <button className="px-6 py-2.5 font-bold border hover:bg-muted rounded-xl transition-colors">
+          <button
+            onClick={onSaveDraft}
+            disabled={publishing || saving}
+            className="flex items-center gap-2 px-6 py-2.5 font-bold border hover:bg-muted rounded-xl transition-colors disabled:opacity-50"
+          >
+            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
             Save as Draft
           </button>
           <button
             onClick={onPublish}
-            className="flex items-center gap-2 px-6 py-2.5 bg-primary text-primary-foreground font-bold rounded-xl hover:opacity-90 transition-opacity"
+            disabled={publishing || saving}
+            className="flex items-center gap-2 px-6 py-2.5 bg-primary text-primary-foreground font-bold rounded-xl hover:opacity-90 transition-opacity disabled:opacity-50"
           >
-            <Play className="w-4 h-4 fill-current" /> Publish Test
+            {publishing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4 fill-current" />} Publish Test
           </button>
         </div>
       </div>

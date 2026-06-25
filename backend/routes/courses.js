@@ -14,14 +14,23 @@ router.get("/", authenticate, async (req, res, next) => {
     `);
 
     if (req.user.role === "student") {
-      // Students only see courses they are enrolled in
       const { data: enrollments } = await supabase
         .from("enrollments")
         .select("course_id")
         .eq("student_id", req.user.id);
       const enrolledIds = (enrollments || []).map((e) => e.course_id).filter(Boolean);
-      if (enrolledIds.length === 0) return res.json({ data: [] });
-      query = query.in("id", enrolledIds);
+
+      if (req.query.available === "true") {
+        // Return institution courses NOT yet enrolled in
+        query = query.eq("institution_id", req.user.institution_id);
+        if (enrolledIds.length > 0) {
+          query = query.not("id", "in", `(${enrolledIds.join(",")})`);
+        }
+      } else {
+        // Default: return only enrolled courses
+        if (enrolledIds.length === 0) return res.json({ data: [] });
+        query = query.in("id", enrolledIds);
+      }
     } else if (req.user.role !== "super-admin") {
       query = query.eq("institution_id", req.user.institution_id);
     }

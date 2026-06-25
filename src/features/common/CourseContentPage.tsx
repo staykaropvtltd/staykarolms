@@ -26,7 +26,6 @@ function openContentUrl(url: string | undefined) {
     toast.error("No file URL available for this content.");
     return;
   }
-  console.log("[PREVIEW] Opening content URL:", url);
   window.open(url, "_blank", "noopener,noreferrer");
 }
 
@@ -52,30 +51,23 @@ function UploadModal({ courseId, moduleId, onClose, onSuccess }: { courseId: str
       // Step 1: Upload file to Supabase Storage via backend
       setUploadProgress("Uploading file…");
       const file = files[0];
-      console.log("[UPLOAD] Step 1 — Uploading file:", file.name, "size:", file.size, "type:", file.type);
 
       const { data: uploadData, error: uploadError } = await uploadCourseFile(file, "course-content");
 
       if (uploadError || !uploadData) {
-        console.error("[UPLOAD] File upload failed:", uploadError);
-        toast.error(uploadError || "File upload failed");
+        toast.error(uploadError || "File upload failed. Make sure the backend server is running.");
         return;
       }
 
-      console.log("[UPLOAD] Step 2 — Upload success. Stored path:", uploadData.path);
-      console.log("[UPLOAD] Step 3 — Generated public URL:", uploadData.url);
-
       // Step 2: Save content record with real URL
       setUploadProgress("Saving content record…");
-      const saveResult = await addCourseContent(courseId, {
+      await addCourseContent(courseId, {
         title,
         module_id: moduleId,
         type: type.toLowerCase(),
         url: uploadData.url,
         duration_mins: 15,
       });
-
-      console.log("[UPLOAD] Step 4 — Saved to DB. URL stored:", uploadData.url, "| DB response:", saveResult);
 
       toast.success("Content uploaded successfully");
       onSuccess();
