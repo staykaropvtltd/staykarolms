@@ -49,7 +49,7 @@ function CourseCard({ course, onSelect, selected }: { course: EnrolledCourse; on
       className={`w-full text-left rounded-xl border p-4 transition-all ${selected ? "border-primary bg-primary/5 ring-1 ring-primary/30" : "border-border bg-card hover:bg-accent/20"}`}
     >
       <div className="flex items-center gap-3">
-        <div className="w-10 h-10 rounded-xl bg-gradient-to-br [var(--gold-muted)] flex items-center justify-center text-xl shrink-0">
+        <div className="w-10 h-10 rounded-xl flex items-center justify-center text-xl shrink-0" style={{ background: "var(--gold-muted)" }}>
           {course.thumbnail}
         </div>
         <div className="flex-1 min-w-0">
@@ -92,11 +92,10 @@ function VideoPlayer({ lesson }: { lesson: CourseLesson | null }) {
   const isCode = lesson.type === "code";
   if (isPdfOrDoc || isCode) {
     const Icon = isPdfOrDoc ? FileText : Code2;
-    const iconColor = isPdfOrDoc ? "text-red-500" : "text-[var(--gold)]";
     return (
       <div className="aspect-video bg-muted/20 rounded-xl flex flex-col items-center justify-center border border-border gap-4 p-6">
         <div className="w-20 h-20 rounded-2xl bg-muted flex items-center justify-center">
-          <Icon className={`w-10 h-10 ${iconColor}`} />
+          <Icon className="w-10 h-10" style={isPdfOrDoc ? { color: "#ef4444" } : { color: "var(--gold)" }} />
         </div>
         <div className="text-center">
           <p className="font-semibold text-foreground text-lg">{lesson.title}</p>
@@ -405,10 +404,10 @@ export function MyCoursesPage() {
                   <span>·</span>
                   <span className="flex items-center gap-1"><Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" />{selectedCourse!.rating}</span>
                   <span>·</span>
-                  <span className="flex items-center gap-1"><Zap className="w-3.5 h-3.5 [var(--gold)]" />+{selectedCourse!.xpReward} XP on completion</span>
+                  <span className="flex items-center gap-1"><Zap className="w-3.5 h-3.5" style={{ color: "var(--gold)" }} />+{selectedCourse!.xpReward} XP on completion</span>
                 </div>
               </div>
-              <span className={`px-3 py-1 rounded-full text-sm font-semibold tabular-nums ${selectedCourse!.progress >= 90 ? "bg-[var(--gold-muted)] text-[var(--gold)]" : "bg-[var(--gold-muted)] text-[var(--gold)]"}`}>
+              <span className="px-3 py-1 rounded-full text-sm font-semibold tabular-nums" style={{ background: "var(--gold-muted)", color: "var(--gold)" }}>
                 {selectedCourse!.progress}%
               </span>
             </div>
@@ -421,7 +420,7 @@ export function MyCoursesPage() {
             {selectedCourse!.progress >= 90 && (
               <div className="mt-3 flex items-center gap-2 p-3 border rounded-lg" style={{ background: "var(--gold-muted)", borderColor: "color-mix(in srgb, var(--gold) 30%, transparent)" }}>
                 <CheckCircle className="w-4 h-4 shrink-0" style={{ color: "var(--gold)" }} />
-                <p className="text-sm text-[var(--gold)] font-medium">Almost there! Complete the final lesson to earn your certificate 🎓</p>
+                <p className="text-sm font-medium" style={{ color: "var(--gold)" }}>Almost there! Complete the final lesson to earn your certificate 🎓</p>
               </div>
             )}
           </div>
