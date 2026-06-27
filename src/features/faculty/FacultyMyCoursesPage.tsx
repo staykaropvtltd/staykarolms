@@ -278,7 +278,7 @@ function ModuleRow({
                   </div>
                   {item.url && (
                     <a href={item.url} target="_blank" rel="noopener noreferrer"
-                      className="opacity-0 group-hover:opacity-100 text-xs text-[var(--gold)] hover:underline mr-1">Open</a>
+                      className="text-xs text-[var(--gold)] hover:underline mr-2 shrink-0">Open</a>
                   )}
                   <button
                     onClick={() => handleDeleteContent(item)}

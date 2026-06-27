@@ -580,7 +580,7 @@ export function StudentsPage({ userType }: StudentsPageProps) {
           studentId={selectedId}
           onClose={() => setSelectedId(null)}
           onUpdated={fetchStudents}
-          canDelete={isAdmin}
+          canDelete={true}
         />
       )}
 

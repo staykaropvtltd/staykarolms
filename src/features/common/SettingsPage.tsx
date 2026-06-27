@@ -6,6 +6,7 @@ import { Button } from "@/shared/components/ui/button";
 import { toast } from "sonner";
 import { useAuth } from "@/shared/context/AuthContext";
 import { updateUser, uploadCourseFile } from "@/shared/lib/api";
+import { supabase } from "@/shared/lib/supabase";
 
 interface SettingsPageProps {
   userType: UserType;
@@ -35,6 +36,11 @@ export function SettingsPage({ userType }: SettingsPageProps) {
   const [saved, setSaved] = useState(false);
   const [loading, setLoading] = useState(false);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const [passwordLoading, setPasswordLoading] = useState(false);
+  const [passwordForm, setPasswordForm] = useState({ newPassword: "", confirmPassword: "" });
+  const [appearanceTheme, setAppearanceTheme] = useState<"Light" | "Dark" | "System">(
+    () => (localStorage.getItem("sk-theme") as "Light" | "Dark" | "System") || "System"
+  );
   const { user, refreshUser } = useAuth();
   const photoInputRef = useRef<HTMLInputElement>(null);
 
@@ -93,6 +99,27 @@ export function SettingsPage({ userType }: SettingsPageProps) {
     setSaved(true);
     toast.success("Settings saved successfully!");
     setTimeout(() => setSaved(false), 2000);
+  };
+
+  const handleUpdatePassword = async () => {
+    if (!passwordForm.newPassword) { toast.error("Enter a new password"); return; }
+    if (passwordForm.newPassword.length < 6) { toast.error("Password must be at least 6 characters"); return; }
+    if (passwordForm.newPassword !== passwordForm.confirmPassword) { toast.error("Passwords do not match"); return; }
+    setPasswordLoading(true);
+    try {
+      const { error } = await supabase.auth.updateUser({ password: passwordForm.newPassword });
+      if (error) { toast.error(error.message); return; }
+      toast.success("Password updated successfully!");
+      setPasswordForm({ newPassword: "", confirmPassword: "" });
+    } catch (err: any) {
+      toast.error(err.message || "Failed to update password");
+    }
+    setPasswordLoading(false);
+  };
+
+  const handleSaveAppearance = () => {
+    localStorage.setItem("sk-theme", appearanceTheme);
+    toast.success("Appearance saved!");
   };
 
   const getInitials = (name: string) => {
@@ -220,23 +247,29 @@ export function SettingsPage({ userType }: SettingsPageProps) {
               <div className="space-y-4">
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div>
-                    <label className="text-xs font-medium text-muted-foreground">Current password</label>
-                    <input type="password" className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm" placeholder="••••••••" />
-                  </div>
-                </div>
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <div>
                     <label className="text-xs font-medium text-muted-foreground">New password</label>
-                    <input type="password" className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm" placeholder="••••••••" />
+                    <input
+                      type="password"
+                      value={passwordForm.newPassword}
+                      onChange={e => setPasswordForm(f => ({ ...f, newPassword: e.target.value }))}
+                      className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+                      placeholder="Min 6 characters"
+                    />
                   </div>
                   <div>
                     <label className="text-xs font-medium text-muted-foreground">Confirm new password</label>
-                    <input type="password" className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm" placeholder="••••••••" />
+                    <input
+                      type="password"
+                      value={passwordForm.confirmPassword}
+                      onChange={e => setPasswordForm(f => ({ ...f, confirmPassword: e.target.value }))}
+                      className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+                      placeholder="Repeat new password"
+                    />
                   </div>
                 </div>
               </div>
-              <Button className="mt-4 gap-2" variant="secondary" onClick={handleSave}>
-                <Save className="w-4 h-4" /> {saved ? "Updated!" : "Update password"}
+              <Button className="mt-4 gap-2" variant="secondary" onClick={handleUpdatePassword} disabled={passwordLoading}>
+                {passwordLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} Update password
               </Button>
 
               <div className="mt-6 pt-6 border-t border-border">
@@ -311,9 +344,15 @@ export function SettingsPage({ userType }: SettingsPageProps) {
                 <div>
                   <label className="text-xs font-medium text-muted-foreground block mb-2">Theme</label>
                   <div className="flex gap-3">
-                    {["Light", "Dark", "System"].map(t => (
+                    {(["Light", "Dark", "System"] as const).map(t => (
                       <label key={t} className="flex items-center gap-2 cursor-pointer">
-                        <input type="radio" name="theme" defaultChecked={t === "System"} className="accent-primary" />
+                        <input
+                          type="radio"
+                          name="theme"
+                          checked={appearanceTheme === t}
+                          onChange={() => setAppearanceTheme(t)}
+                          className="accent-primary"
+                        />
                         <span className="text-sm text-foreground">{t}</span>
                       </label>
                     ))}
@@ -335,8 +374,8 @@ export function SettingsPage({ userType }: SettingsPageProps) {
                   </select>
                 </div>
               </div>
-              <Button className="mt-4 gap-2" onClick={handleSave}>
-                <Save className="w-4 h-4" /> {saved ? "Saved!" : "Save appearance"}
+              <Button className="mt-4 gap-2" onClick={handleSaveAppearance}>
+                <Save className="w-4 h-4" /> Save appearance
               </Button>
             </section>
           )}

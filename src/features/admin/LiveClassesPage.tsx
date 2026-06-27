@@ -1,10 +1,10 @@
 import { useState, useEffect } from "react";
-import { Video, Plus, X, Users, Clock, ExternalLink, CheckCircle, Loader2 } from "lucide-react";
+import { Video, Plus, X, Users, Clock, ExternalLink, CheckCircle, Loader2, Trash2 } from "lucide-react";
 import { PageHeader } from "@/shared/components/PageHeader";
 import { StatCard } from "@/shared/components/StatCard";
 import { Button } from "@/shared/components/ui/button";
 import { toast } from "sonner";
-import { getLiveClasses, createLiveClass, startAttendance, getCourses, getBatches, endLiveClass, getLiveClassAttendance, updateLiveClassAttendance } from "@/shared/lib/api";
+import { getLiveClasses, createLiveClass, startAttendance, getCourses, getBatches, endLiveClass, getLiveClassAttendance, updateLiveClassAttendance, deleteLiveClass } from "@/shared/lib/api";
 
 interface LiveClass {
   id: string;
@@ -302,6 +302,8 @@ export function LiveClassesPage() {
   const [tab, setTab] = useState<"upcoming" | "completed">("upcoming");
   const [showModal, setShowModal] = useState(false);
   const [attendanceClassId, setAttendanceClassId] = useState<string | null>(null);
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const loadClasses = async () => {
     setLoading(true);
@@ -317,6 +319,16 @@ export function LiveClassesPage() {
   useEffect(() => {
     loadClasses();
   }, []);
+
+  const handleDelete = async (id: string) => {
+    setDeleting(true);
+    const { error } = await deleteLiveClass(id);
+    setDeleting(false);
+    if (error) { toast.error(error); return; }
+    toast.success("Class deleted");
+    setDeleteConfirmId(null);
+    loadClasses();
+  };
 
   const handleStartAttendance = async (id: string, title: string) => {
     try {
@@ -399,7 +411,22 @@ export function LiveClassesPage() {
                   <span>{cls.duration_mins} mins</span>
                 </div>
 
-                <div className="flex gap-2">
+                <div className="flex gap-2 flex-wrap">
+                  {/* Delete toggle */}
+                  {deleteConfirmId === cls.id ? (
+                    <div className="flex items-center gap-1.5 mr-auto">
+                      <span className="text-xs text-red-500 font-medium">Delete?</span>
+                      <Button size="sm" className="bg-red-500 hover:bg-red-600 text-white h-7 px-2 text-xs" onClick={() => handleDelete(cls.id)} disabled={deleting}>
+                        {deleting ? <Loader2 className="w-3 h-3 animate-spin" /> : "Yes"}
+                      </Button>
+                      <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => setDeleteConfirmId(null)} disabled={deleting}>No</Button>
+                    </div>
+                  ) : (
+                    <button onClick={() => setDeleteConfirmId(cls.id)}
+                      className="p-1.5 rounded-md text-muted-foreground hover:text-red-500 hover:bg-red-500/10 transition-colors mr-auto">
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
                   {(cls.status === "upcoming" || cls.status === "live") && (
                     <>
                       {cls.status === "upcoming" && (

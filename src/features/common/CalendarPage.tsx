@@ -63,8 +63,12 @@ function ScheduleModal({ onClose, onScheduled }: { onClose: () => void, onSchedu
     const scheduled_at = new Date(`${form.date}T${form.time}`).toISOString();
     try {
       const { error } = await createCalendarEvent({
-        ...form,
+        title: form.title,
+        type: form.type,
+        course_id: form.course_id || undefined,
         scheduled_at,
+        duration_mins: form.duration_mins,
+        description: form.description || undefined,
       });
       if (error) throw new Error(error);
       toast.success("Event scheduled successfully");

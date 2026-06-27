@@ -1,10 +1,10 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router";
-import { GraduationCap, Mail, Plus, Search, Star, X, Loader2, AlertCircle } from "lucide-react";
+import { GraduationCap, Mail, Plus, Search, Star, X, Loader2, AlertCircle, Trash2 } from "lucide-react";
 import { PageHeader } from "@/shared/components/PageHeader";
 import { StatCard } from "@/shared/components/StatCard";
 import { Button } from "@/shared/components/ui/button";
-import { getUsers, createUser } from "@/shared/lib/api";
+import { getUsers, createUser, deleteUser } from "@/shared/lib/api";
 import { toast } from "sonner";
 
 const STATUS_COLORS: Record<string, string> = {
@@ -89,6 +89,8 @@ export function FacultyAdminPage() {
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [showModal, setShowModal] = useState(false);
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const fetchFaculty = async () => {
     setLoading(true);
@@ -97,6 +99,16 @@ export function FacultyAdminPage() {
     if (err) setError(err);
     else setFaculty((data as ApiFaculty[]) || []);
     setLoading(false);
+  };
+
+  const handleDelete = async (id: string) => {
+    setDeleting(true);
+    const { error: err } = await deleteUser(id);
+    setDeleting(false);
+    if (err) { toast.error(err); return; }
+    toast.success("Faculty member removed");
+    setDeleteConfirmId(null);
+    fetchFaculty();
   };
 
   useEffect(() => { fetchFaculty(); }, []);
@@ -196,9 +208,24 @@ export function FacultyAdminPage() {
                       </span>
                     </td>
                     <td className="py-3 px-6 text-right">
-                      <Button variant="ghost" size="sm" className="gap-1" onClick={() => navigate("/admin/messages")}>
-                        <Mail className="size-3.5" /> Contact
-                      </Button>
+                      <div className="flex items-center justify-end gap-2">
+                        <Button variant="ghost" size="sm" className="gap-1" onClick={() => navigate("/admin/messages")}>
+                          <Mail className="size-3.5" /> Contact
+                        </Button>
+                        {deleteConfirmId === f.id ? (
+                          <>
+                            <Button size="sm" className="bg-red-500 hover:bg-red-600 text-white" onClick={() => handleDelete(f.id)} disabled={deleting}>
+                              {deleting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Confirm"}
+                            </Button>
+                            <Button size="sm" variant="ghost" onClick={() => setDeleteConfirmId(null)} disabled={deleting}>Cancel</Button>
+                          </>
+                        ) : (
+                          <button onClick={() => setDeleteConfirmId(f.id)}
+                            className="p-1.5 rounded-md text-muted-foreground hover:text-red-500 hover:bg-red-500/10 transition-colors">
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))

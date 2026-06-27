@@ -2,7 +2,7 @@ import { NavLink, useNavigate } from "react-router";
 import {
   LayoutDashboard, BookOpen, Users, FileText, BarChart3, Settings,
   Code2, Award, Calendar, MessageSquare, Mic, Building2, DollarSign,
-  Server, Layers, TrendingUp, Bell, Video, Upload, ClipboardCheck,
+  Server, Layers, TrendingUp, Bell, Video, ClipboardCheck,
   UserCheck, Shield, LifeBuoy, CreditCard, Globe, LogOut, Brain, ClipboardList
 } from "lucide-react";
 import type { UserType } from "../userTypes";
@@ -57,7 +57,6 @@ const facultyMenu: MenuItem[] = [
   { path: "students",            label: "Students",            icon: Users },
   { path: "student-performance", label: "Student Performance", icon: TrendingUp },
   { path: "assignment-review",   label: "Assignment Reviews",  icon: ClipboardCheck },
-  { path: "course-content",      label: "Course Content",      icon: Upload },
   { path: "tests",               label: "Tests",               icon: ClipboardList },
   { path: "live-classes",        label: "Live Classes",        icon: Video },
   { path: "analytics",           label: "Analytics",           icon: BarChart3 },

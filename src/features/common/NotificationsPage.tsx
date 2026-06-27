@@ -3,6 +3,7 @@ import {
   Bell, CheckCheck, Info, AlertTriangle, CheckCircle, XCircle,
   X, FileText, BookOpen, Trash2, Loader2,
 } from "lucide-react";
+import { useNavigate } from "react-router";
 import { PageHeader } from "@/shared/components/PageHeader";
 import { Button } from "@/shared/components/ui/button";
 import { getNotifications, markNotificationRead } from "@/shared/lib/api";
@@ -57,17 +58,40 @@ const CATEGORY_LABELS: Record<ApiNotification["category"], string> = {
 
 type Tab = "All" | ApiNotification["category"];
 
-function getActionButton(category: ApiNotification["category"], onClose: () => void) {
+function getActionButton(
+  category: ApiNotification["category"],
+  onClose: () => void,
+  navigate: (path: string) => void,
+  role: string
+) {
+  const roleRoutes: Record<string, { assignments: string; courses: string; certificates: string }> = {
+    student:      { assignments: "assignments",       courses: "my-courses",   certificates: "certificates" },
+    faculty:      { assignments: "assignment-review", courses: "my-courses",   certificates: "certificates" },
+    admin:        { assignments: "assignments",       courses: "courses",      certificates: "certificates" },
+    "super-admin":{ assignments: "assignments",       courses: "courses",      certificates: "certificates" },
+  };
+  const routes = roleRoutes[role] || roleRoutes.student;
+
   if (category === "assignment") {
     return (
-      <Button className="w-full gap-2" style={{ background: "var(--gold)", color: "#1A1A1A" }}>
+      <Button className="w-full gap-2" style={{ background: "var(--gold)", color: "#1A1A1A" }}
+        onClick={() => { onClose(); navigate(`/${role}/${routes.assignments}`); }}>
         <FileText className="w-4 h-4" /> View Assignment
       </Button>
     );
   }
-  if (category === "academic" || category === "certificate") {
+  if (category === "certificate") {
     return (
-      <Button className="w-full gap-2" style={{ background: "var(--gold)", color: "#1A1A1A" }}>
+      <Button className="w-full gap-2" style={{ background: "var(--gold)", color: "#1A1A1A" }}
+        onClick={() => { onClose(); navigate(`/${role}/${routes.certificates}`); }}>
+        <BookOpen className="w-4 h-4" /> View Certificate
+      </Button>
+    );
+  }
+  if (category === "academic") {
+    return (
+      <Button className="w-full gap-2" style={{ background: "var(--gold)", color: "#1A1A1A" }}
+        onClick={() => { onClose(); navigate(`/${role}/${routes.courses}`); }}>
         <BookOpen className="w-4 h-4" /> View Course
       </Button>
     );
@@ -89,6 +113,7 @@ function formatTime(iso: string): string {
 
 export function NotificationsPage() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [notifications, setNotifications] = useState<ApiNotification[]>([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<Tab>("All");
@@ -312,7 +337,7 @@ export function NotificationsPage() {
               </div>
 
               <div className="p-6 border-t border-border shrink-0 space-y-2">
-                {getActionButton(selected.category, closeDrawer)}
+                {getActionButton(selected.category, closeDrawer, navigate, user?.role || "student")}
                 <Button variant="ghost" className="w-full text-muted-foreground" onClick={closeDrawer}>Close</Button>
               </div>
             </motion.div>

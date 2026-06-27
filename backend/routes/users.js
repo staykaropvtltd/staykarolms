@@ -40,7 +40,7 @@ router.get("/:id", authenticate, requireRole("admin", "faculty", "super-admin"),
       `)
       .eq("id", req.params.id);
 
-    if (req.user.role !== "super-admin") {
+    if (req.user.role !== "super-admin" && req.user.institution_id) {
       query = query.eq("institution_id", req.user.institution_id);
     }
 
@@ -197,7 +197,7 @@ router.put("/:id", authenticate, async (req, res, next) => {
 router.delete(
   "/:id",
   authenticate,
-  requireRole("admin", "super-admin"),
+  requireRole("admin", "faculty", "super-admin"),
   async (req, res, next) => {
     try {
       const { error } = await supabase.auth.admin.deleteUser(req.params.id);
