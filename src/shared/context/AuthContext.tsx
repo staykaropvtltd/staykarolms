@@ -111,6 +111,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return promise;
   }, []);
 
+  // When the browser comes back online after being offline, Supabase won't
+  // automatically refresh the token. Force a refresh so the cached token
+  // stays valid and API calls don't get stuck in 401 loops.
+  useEffect(() => {
+    const handleOnline = async () => {
+      try {
+        const { data } = await supabase.auth.refreshSession();
+        if (data.session?.access_token) {
+          setCachedToken(data.session.access_token);
+        }
+      } catch (_) {}
+    };
+    window.addEventListener("online", handleOnline);
+    return () => window.removeEventListener("online", handleOnline);
+  }, []);
+
   useEffect(() => {
     let mounted = true;
 

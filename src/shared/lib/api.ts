@@ -71,7 +71,7 @@ async function apiFetch<T = any>(
         // the token via onAuthStateChange, then retry the request once.
         if (res.status === 401 && attempt === 0 && _cachedToken) {
           const tokenAtSend = token;
-          for (let i = 0; i < 3; i++) {
+          for (let i = 0; i < 10; i++) {
             await new Promise(r => setTimeout(r, 500));
             if (_cachedToken && _cachedToken !== tokenAtSend) {
               attempt++;

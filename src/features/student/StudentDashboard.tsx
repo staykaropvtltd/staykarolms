@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { motion } from "motion/react";
 import {
   BookOpen, Trophy, TrendingUp, Flame, Zap,
@@ -138,12 +138,29 @@ function UpcomingTestsWidget({ tests }: { tests: any[] }) {
 // ─── Active Live Classes Widget ───────────────────────────────────────────────
 function ActiveLiveClassesWidget() {
   const [liveClasses, setLiveClasses] = useState<any[]>([]);
+  const { isAuthenticated } = useAuth();
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   useEffect(() => {
-    const load = async () => { try { const { data } = await getActiveLiveClasses(); if (data) setLiveClasses(data); } catch (err) {} };
+    if (!isAuthenticated) return;
+
+    const load = async () => {
+      try {
+        const { data, status } = await getActiveLiveClasses();
+        if (data) setLiveClasses(data);
+        if (status === 401 && intervalRef.current) {
+          clearInterval(intervalRef.current);
+          intervalRef.current = null;
+        }
+      } catch (err) {}
+    };
+
     load();
-    const t = setInterval(load, 30000);
-    return () => clearInterval(t);
-  }, []);
+    intervalRef.current = setInterval(load, 30000);
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+    };
+  }, [isAuthenticated]);
   if (liveClasses.length === 0) return null;
   return (
     <div className="bg-card border border-red-500/30 rounded-xl p-5 relative overflow-hidden">
@@ -342,6 +359,8 @@ export function StudentDashboard() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (!user) return;
+    setLoading(true);
     Promise.all([
       getStudentAnalytics(),
       getAssignments(),
@@ -354,7 +373,7 @@ export function StudentDashboard() {
       })
       .catch(console.error)
       .finally(() => setLoading(false));
-  }, []);
+  }, [user?.id]);
 
   if (loading) return <DashboardSkeletons />;
 
