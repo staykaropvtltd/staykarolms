@@ -4,6 +4,7 @@ import { StatCard } from "@/shared/components/StatCard";
 import { useNavigate } from "react-router";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { getAdminAnalytics, getUsers } from "@/shared/lib/api";
+import { useAuth } from "@/shared/context/AuthContext";
 
 const tooltipStyle = {
   backgroundColor: "var(--card)",
@@ -15,19 +16,26 @@ const tooltipStyle = {
 
 export function AdminDashboard() {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [stats, setStats] = useState<any>(null);
   const [recentStudents, setRecentStudents] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (!user) return;
+    const controller = new AbortController();
     Promise.all([
       getAdminAnalytics(),
       getUsers("student"),
     ]).then(([analyticsRes, studentsRes]) => {
+      if (controller.signal.aborted) return;
       setStats(analyticsRes.data);
       setRecentStudents((studentsRes.data || []).slice(0, 5));
-    }).finally(() => setLoading(false));
-  }, []);
+    }).finally(() => {
+      if (!controller.signal.aborted) setLoading(false);
+    });
+    return () => controller.abort();
+  }, [user?.id]);
 
   if (loading) return (
     <div className="flex h-full items-center justify-center p-8">
