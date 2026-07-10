@@ -89,10 +89,10 @@ function ManageTenantModal({ tenant, onClose }: { tenant: Tenant; onClose: () =>
         <div className="p-6 space-y-4">
           <div className="grid grid-cols-2 gap-3">
             {[
-              { label: "Students", value: tenant.students.toLocaleString() },
-              { label: "Faculty", value: tenant.faculty },
-              { label: "Courses", value: tenant.courses },
-              { label: "MRR", value: `₹${(tenant.mrr / 1000).toFixed(0)}K` },
+              { label: "Students", value: (tenant.students ?? 0).toLocaleString() },
+              { label: "Faculty", value: tenant.faculty ?? 0 },
+              { label: "Courses", value: tenant.courses ?? 0 },
+              { label: "MRR", value: `₹${((tenant.mrr ?? 0) / 1000).toFixed(0)}K` },
             ].map(({ label, value }) => (
               <div key={label} className="bg-muted/30 rounded-lg p-3">
                 <p className="text-xs text-muted-foreground">{label}</p>
@@ -118,9 +118,9 @@ function ManageTenantModal({ tenant, onClose }: { tenant: Tenant; onClose: () =>
             <p className="text-xs font-medium text-muted-foreground mb-1.5">Storage usage</p>
             <div className="flex items-center gap-2">
               <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
-                <div className={`h-full rounded-full ${(tenant.storageUsed / tenant.storageLimit) > 0.8 ? "bg-red-500" : "bg-primary"}`} style={{ width: `${(tenant.storageUsed / tenant.storageLimit) * 100}%` }} />
+                <div className={`h-full rounded-full ${((tenant.storageUsed ?? 0) / (tenant.storageLimit || 1)) > 0.8 ? "bg-red-500" : "bg-primary"}`} style={{ width: `${((tenant.storageUsed ?? 0) / (tenant.storageLimit || 1)) * 100}%` }} />
               </div>
-              <span className="text-xs text-muted-foreground tabular-nums">{tenant.storageUsed} / {tenant.storageLimit} TB</span>
+              <span className="text-xs text-muted-foreground tabular-nums">{tenant.storageUsed ?? 0} / {tenant.storageLimit ?? 0} TB</span>
             </div>
           </div>
         </div>
@@ -252,14 +252,14 @@ export function ClientsPage() {
                   </td>
                   <td className="py-3 px-4 text-muted-foreground text-xs">{t.type}</td>
                   <td className="py-3 px-4"><span className={`px-2 py-0.5 rounded-full text-xs font-medium ${PLAN_COLORS[t.plan]}`}>{t.plan}</span></td>
-                  <td className="py-3 px-4 text-right tabular-nums text-muted-foreground">{t.students.toLocaleString()}</td>
-                  <td className="py-3 px-4 text-right tabular-nums font-semibold">₹{(t.mrr / 1000).toFixed(0)}K</td>
+                  <td className="py-3 px-4 text-right tabular-nums text-muted-foreground">{(t.students ?? 0).toLocaleString()}</td>
+                  <td className="py-3 px-4 text-right tabular-nums font-semibold">₹{((t.mrr ?? 0) / 1000).toFixed(0)}K</td>
                   <td className="py-3 px-4">
                     <div className="flex items-center gap-1.5">
                       <div className="w-16 h-1.5 bg-muted rounded-full overflow-hidden">
-                        <div className={`h-full rounded-full ${(t.storageUsed / t.storageLimit) > 0.8 ? "bg-red-500" : "bg-primary"}`} style={{ width: `${(t.storageUsed / t.storageLimit) * 100}%` }} />
+                        <div className={`h-full rounded-full ${((t.storageUsed ?? 0) / (t.storageLimit || 1)) > 0.8 ? "bg-red-500" : "bg-primary"}`} style={{ width: `${((t.storageUsed ?? 0) / (t.storageLimit || 1)) * 100}%` }} />
                       </div>
-                      <span className="text-xs text-muted-foreground tabular-nums">{t.storageUsed}/{t.storageLimit}TB</span>
+                      <span className="text-xs text-muted-foreground tabular-nums">{t.storageUsed ?? 0}/{t.storageLimit ?? 0}TB</span>
                     </div>
                   </td>
                   <td className="py-3 px-4"><span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[t.status]}`}>{t.status}</span></td>
