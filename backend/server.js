@@ -221,6 +221,7 @@ app.use("/api/billing", require("./routes/billing"));
 app.use("/api/certificates", require("./routes/certificates"));
 app.use("/api/batches", require("./routes/batches"));
 app.use("/api/ai-sessions", require("./routes/aiSessions"));
+app.use("/api/ai-questions", require("./routes/aiQuestions"));
 app.use("/api/live-classes", require("./routes/liveClasses"));
 app.use("/api/messages", require("./routes/messages"));
 app.use("/api/calendar", require("./routes/calendar"));

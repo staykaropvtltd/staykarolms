@@ -95,6 +95,7 @@ export const router = createBrowserRouter([
           { path: "audit",            element: <AuditLogsPage /> },
           { path: "support",          element: <SupportTicketsPage /> },
           { path: "global-users",     element: <GlobalUsersPage /> },
+          { path: "ai-interviewer",   element: <AiInterviewerPage userType="super-admin" /> },
           { path: "settings",         element: <SettingsPage userType="super-admin" /> },
         ],
       },

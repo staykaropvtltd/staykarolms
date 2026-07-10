@@ -30,6 +30,7 @@ const superAdminMenu: MenuItem[] = [
   { path: "audit",         label: "Audit Logs",        icon: Shield },
   { path: "support",       label: "Support Tickets",   icon: LifeBuoy },
   { path: "global-users",  label: "Global Users",      icon: Globe },
+  { path: "ai-interviewer",label: "AI Interviewer",    icon: Mic },
   { path: "settings",      label: "Global Settings",   icon: Settings },
 ];
 

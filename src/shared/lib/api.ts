@@ -376,6 +376,26 @@ export const saveAiSession = (sessionData: {
 
 export const getAiSessions = () => apiFetch("/api/ai-sessions");
 
+// ── AI Interview Questions ─────────────────────────────────────────────────────
+
+export const getInterviewQuestions = (params?: { track?: string; difficulty?: string }) => {
+  const qs = params
+    ? "?" + new URLSearchParams(Object.fromEntries(Object.entries(params).filter(([, v]) => v))).toString()
+    : "";
+  return apiFetch(`/api/ai-questions${qs}`);
+};
+
+export const createInterviewQuestion = (data: {
+  question: string;
+  category?: string;
+  difficulty?: string;
+  track?: string;
+  answer_guide?: string;
+}) => apiFetch("/api/ai-questions", { method: "POST", body: JSON.stringify(data) });
+
+export const deleteInterviewQuestion = (id: string) =>
+  apiFetch(`/api/ai-questions/${id}`, { method: "DELETE" });
+
 // ── Certificates ──────────────────────────────────────────────────────────────
 
 export const getCertificates = () => apiFetch("/api/certificates");
