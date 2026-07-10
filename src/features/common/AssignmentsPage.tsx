@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router";
-import { ClipboardList, FilePlus2, X, Search, Loader2, AlertCircle, Upload, CheckCircle2 } from "lucide-react";
+import { ClipboardList, FilePlus2, X, Search, Loader2, AlertCircle, Upload, CheckCircle2, FileUp } from "lucide-react";
 import type { UserType } from "@/shared/userTypes";
 import { PageHeader } from "@/shared/components/PageHeader";
 import { StatCard } from "@/shared/components/StatCard";
@@ -165,6 +165,206 @@ function CreateAssignmentModal({ onClose, onCreated }: { onClose: () => void; on
 }
 
 
+// ── File import helpers ────────────────────────────────────────────────────────
+
+interface ParsedAssignment {
+  title: string;
+  description?: string;
+  due_date?: string;
+  max_marks?: number;
+  course_id?: string;
+}
+
+function parseAssignmentsFile(text: string, fileName: string): { assignments: ParsedAssignment[]; errors: string[] } {
+  const assignments: ParsedAssignment[] = [];
+  const errors: string[] = [];
+
+  try {
+    if (fileName.endsWith(".json")) {
+      const raw = JSON.parse(text);
+      const rows = Array.isArray(raw) ? raw : [raw];
+      rows.forEach((row: any, i: number) => {
+        if (!row.title) { errors.push(`Row ${i + 1}: missing "title"`); return; }
+        assignments.push({
+          title: String(row.title).trim(),
+          description: row.description ? String(row.description).trim() : undefined,
+          due_date: row.due_date ? String(row.due_date).trim() : undefined,
+          max_marks: row.max_marks != null ? Number(row.max_marks) : undefined,
+          course_id: row.course_id ? String(row.course_id).trim() : undefined,
+        });
+      });
+    } else {
+      // CSV
+      const lines = text.split(/\r?\n/).filter(l => l.trim());
+      if (!lines.length) { errors.push("File is empty"); return { assignments, errors }; }
+
+      const firstLine = lines[0].toLowerCase();
+      const hasHeader = firstLine.includes("title") || firstLine.includes("description");
+      const dataLines = hasHeader ? lines.slice(1) : lines;
+
+      // Detect delimiter
+      const delim = lines[0].includes("\t") ? "\t" : ",";
+
+      dataLines.forEach((line, idx) => {
+        const row = line.split(delim).map(c => c.trim().replace(/^"|"$/g, ""));
+        const [title, description, due_date, max_marks_raw, course_id] = row;
+        const rowNum = hasHeader ? idx + 2 : idx + 1;
+        if (!title) { errors.push(`Row ${rowNum}: missing title`); return; }
+        assignments.push({
+          title,
+          description: description || undefined,
+          due_date: due_date || undefined,
+          max_marks: max_marks_raw ? Number(max_marks_raw) : undefined,
+          course_id: course_id || undefined,
+        });
+      });
+    }
+  } catch (e: any) {
+    errors.push(`Parse error: ${e.message}`);
+  }
+
+  return { assignments, errors };
+}
+
+function ImportAssignmentsModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [fileName, setFileName] = useState("");
+  const [parsed, setParsed] = useState<ParsedAssignment[]>([]);
+  const [parseErrors, setParseErrors] = useState<string[]>([]);
+  const [importing, setImporting] = useState(false);
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+  const [courses, setCourses] = useState<any[]>([]);
+
+  useEffect(() => {
+    getCourses().then(({ data }) => {
+      const raw = (data as any[]) || [];
+      setCourses(raw.map((item: any) => item.courses ?? item));
+    });
+  }, []);
+
+  const handleFile = (file: File) => {
+    setFileName(file.name);
+    setParsed([]);
+    setParseErrors([]);
+    const reader = new FileReader();
+    reader.onload = e => {
+      const text = e.target?.result as string;
+      const { assignments, errors } = parseAssignmentsFile(text, file.name);
+      setParsed(assignments);
+      setParseErrors(errors);
+    };
+    reader.readAsText(file);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    const file = e.dataTransfer.files[0];
+    if (file) handleFile(file);
+  };
+
+  const handleImport = async () => {
+    if (!parsed.length) return;
+    setImporting(true);
+    setProgress({ done: 0, total: parsed.length });
+    let succeeded = 0;
+    for (let i = 0; i < parsed.length; i++) {
+      const a = parsed[i];
+      const { error } = await createAssignment({
+        title: a.title,
+        description: a.description,
+        course_id: a.course_id || undefined,
+        due_date: a.due_date ? new Date(a.due_date).toISOString() : undefined,
+        max_marks: a.max_marks,
+      });
+      if (!error) succeeded++;
+      setProgress({ done: i + 1, total: parsed.length });
+    }
+    setImporting(false);
+    toast.success(`Imported ${succeeded} of ${parsed.length} assignments`);
+    onCreated();
+    onClose();
+  };
+
+  const csvExample = `title,description,due_date,max_marks,course_id\nPython OOP,Implement a class hierarchy,2026-08-01,100,\nData Structures,Build a linked list,2026-08-15,50,`;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+      <div className="bg-card border border-border rounded-xl w-full max-w-lg shadow-xl">
+        <div className="flex items-center justify-between p-6 border-b border-border">
+          <h2 className="text-lg font-semibold text-foreground">Import Assignments from File</h2>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground"><X className="w-5 h-5" /></button>
+        </div>
+
+        <div className="p-6 space-y-4">
+          {/* Drop zone */}
+          <div
+            onDrop={handleDrop}
+            onDragOver={e => e.preventDefault()}
+            onClick={() => fileRef.current?.click()}
+            className="border-2 border-dashed border-border rounded-xl p-8 flex flex-col items-center gap-3 cursor-pointer hover:border-[var(--gold)] transition-colors"
+          >
+            <FileUp className="w-8 h-8 text-muted-foreground" />
+            <div className="text-center">
+              <p className="text-sm font-medium text-foreground">{fileName || "Click or drag a file here"}</p>
+              <p className="text-xs text-muted-foreground mt-1">Accepts .csv, .tsv, .json</p>
+            </div>
+            <input ref={fileRef} type="file" accept=".csv,.tsv,.json,.txt" className="hidden" onChange={e => { if (e.target.files?.[0]) handleFile(e.target.files[0]); }} />
+          </div>
+
+          {/* CSV format hint */}
+          <div className="bg-muted/30 rounded-lg p-3">
+            <p className="text-xs font-medium text-muted-foreground mb-1">CSV format (header row optional):</p>
+            <pre className="text-xs text-foreground font-mono whitespace-pre-wrap">{csvExample}</pre>
+          </div>
+
+          {/* Errors */}
+          {parseErrors.length > 0 && (
+            <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-3 space-y-1">
+              <p className="text-xs font-semibold text-red-600 dark:text-red-400">Parse warnings ({parseErrors.length})</p>
+              {parseErrors.map((e, i) => <p key={i} className="text-xs text-red-600 dark:text-red-400">{e}</p>)}
+            </div>
+          )}
+
+          {/* Preview */}
+          {parsed.length > 0 && (
+            <div className="bg-[var(--gold-muted)] border border-[var(--gold)]/20 rounded-lg p-3">
+              <p className="text-xs font-semibold text-[var(--gold)] mb-2">{parsed.length} assignment{parsed.length !== 1 ? "s" : ""} ready to import</p>
+              <div className="space-y-1 max-h-36 overflow-y-auto">
+                {parsed.map((a, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <CheckCircle2 className="w-3 h-3 text-[var(--gold)] shrink-0" />
+                    <span className="text-xs text-foreground truncate">{a.title}</span>
+                    {a.due_date && <span className="text-xs text-muted-foreground shrink-0">· {a.due_date}</span>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Progress */}
+          {progress && (
+            <div className="space-y-1">
+              <div className="flex justify-between text-xs text-muted-foreground">
+                <span>Importing…</span><span>{progress.done}/{progress.total}</span>
+              </div>
+              <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+                <div className="h-full rounded-full bg-[var(--gold)] transition-all" style={{ width: `${(progress.done / progress.total) * 100}%` }} />
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="flex gap-2 p-6 pt-0">
+          <Button className="flex-1" onClick={handleImport} disabled={importing || !parsed.length}>
+            {importing ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Importing…</> : `Import ${parsed.length || ""} Assignments`}
+          </Button>
+          <Button variant="outline" onClick={onClose} disabled={importing}>Cancel</Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function SubmitAssignmentModal({ assignmentId, onClose, onSubmitted }: { assignmentId: string; onClose: () => void; onSubmitted: () => void }) {
   const { user } = useAuth();
   const fileRef = useRef<HTMLInputElement>(null);
@@ -274,6 +474,7 @@ export function AssignmentsPage({ userType }: AssignmentsPageProps) {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
   const [showModal, setShowModal] = useState(false);
+  const [showImport, setShowImport] = useState(false);
   const [submittingId, setSubmittingId] = useState<string | null>(null);
   const [activeCodingAssignment, setActiveCodingAssignment] = useState<string | null>(null);
 
@@ -334,6 +535,7 @@ export function AssignmentsPage({ userType }: AssignmentsPageProps) {
   return (
     <div className="p-8">
       {showModal && <CreateAssignmentModal onClose={() => setShowModal(false)} onCreated={fetchAssignments} />}
+      {showImport && <ImportAssignmentsModal onClose={() => setShowImport(false)} onCreated={fetchAssignments} />}
       {submittingId && (
         <SubmitAssignmentModal
           assignmentId={submittingId}
@@ -354,9 +556,14 @@ export function AssignmentsPage({ userType }: AssignmentsPageProps) {
         actions={
           <>
             {!isStudent && (
-              <Button size="sm" className="gap-2" onClick={() => setShowModal(true)}>
-                <FilePlus2 className="size-4" /> New assignment
-              </Button>
+              <>
+                <Button size="sm" variant="outline" className="gap-2" onClick={() => setShowImport(true)}>
+                  <FileUp className="size-4" /> Import from file
+                </Button>
+                <Button size="sm" className="gap-2" onClick={() => setShowModal(true)}>
+                  <FilePlus2 className="size-4" /> New assignment
+                </Button>
+              </>
             )}
           </>
         }
