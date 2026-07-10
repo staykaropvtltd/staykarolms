@@ -57,6 +57,12 @@ function SkeletonCard() {
   );
 }
 
+function toISOSafe(s?: string) {
+  if (!s) return undefined;
+  const d = new Date(s);
+  return isNaN(d.getTime()) ? undefined : d.toISOString();
+}
+
 function CreateAssignmentModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
   const [form, setForm] = useState({ title: "", description: "", due_date: "", max_marks: 100, course_id: "" });
   const [loading, setLoading] = useState(false);
@@ -70,12 +76,6 @@ function CreateAssignmentModal({ onClose, onCreated }: { onClose: () => void; on
       setCourses(normalized);
     });
   }, []);
-
-  const toISOSafe = (s?: string) => {
-    if (!s) return undefined;
-    const d = new Date(s);
-    return isNaN(d.getTime()) ? undefined : d.toISOString();
-  };
 
   const handleCreate = async () => {
     if (!form.title.trim()) return;
