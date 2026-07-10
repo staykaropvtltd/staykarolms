@@ -123,6 +123,7 @@ export const router = createBrowserRouter([
           { path: "tests",            element: <TestManagementPage userType="admin" /> },
           { path: "analytics",        element: <AnalyticsPage userType="admin" /> },
           { path: "certificates",     element: <CertificatesPage userType="admin" /> },
+          { path: "messages",         element: <MessagesPage userType="admin" /> },
           { path: "notifications",    element: <NotificationsPage /> },
           { path: "ai-interviewer",   element: <AiInterviewerPage userType="admin" /> },
           { path: "support",          element: <SupportTicketsPage /> },

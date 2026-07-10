@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { useAuth } from "@/shared/context/AuthContext";
 import { updateUser, uploadCourseFile } from "@/shared/lib/api";
 import { supabase } from "@/shared/lib/supabase";
+import { useTheme } from "next-themes";
 
 interface SettingsPageProps {
   userType: UserType;
@@ -38,8 +39,14 @@ export function SettingsPage({ userType }: SettingsPageProps) {
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [passwordLoading, setPasswordLoading] = useState(false);
   const [passwordForm, setPasswordForm] = useState({ newPassword: "", confirmPassword: "" });
+  const { theme: currentTheme, setTheme } = useTheme();
   const [appearanceTheme, setAppearanceTheme] = useState<"Light" | "Dark" | "System">(
-    () => (localStorage.getItem("sk-theme") as "Light" | "Dark" | "System") || "System"
+    () => {
+      const t = currentTheme;
+      if (t === "light") return "Light";
+      if (t === "dark") return "Dark";
+      return "System";
+    }
   );
   const { user, refreshUser } = useAuth();
   const photoInputRef = useRef<HTMLInputElement>(null);
@@ -118,7 +125,8 @@ export function SettingsPage({ userType }: SettingsPageProps) {
   };
 
   const handleSaveAppearance = () => {
-    localStorage.setItem("sk-theme", appearanceTheme);
+    const map: Record<string, string> = { Light: "light", Dark: "dark", System: "system" };
+    setTheme(map[appearanceTheme] || "system");
     toast.success("Appearance saved!");
   };
 
@@ -279,14 +287,14 @@ export function SettingsPage({ userType }: SettingsPageProps) {
                     <p className="text-sm font-medium text-foreground">Authenticator app</p>
                     <p className="text-xs text-muted-foreground">Use an app like Google Authenticator</p>
                   </div>
-                  <Button variant="outline" size="sm">Enable 2FA</Button>
+                  <Button variant="outline" size="sm" onClick={() => toast.info("2FA setup requires email verification — contact your administrator")}>Enable 2FA</Button>
                 </div>
               </div>
 
               <div className="mt-4 p-4 rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/20">
                 <h3 className="text-sm font-semibold text-red-700 dark:text-red-400 mb-1">Danger zone</h3>
                 <p className="text-xs text-muted-foreground mb-3">Permanently delete your account and all associated data.</p>
-                <Button variant="destructive" size="sm">Delete account</Button>
+                <Button variant="destructive" size="sm" onClick={() => { if (window.confirm("Are you sure? This action is permanent and cannot be undone.")) toast.error("Account deletion must be processed by your administrator. Please contact support."); }}>Delete account</Button>
               </div>
             </section>
           )}

@@ -21,7 +21,7 @@ interface Thread {
 }
 
 interface MessagesPageProps {
-  userType: Extract<UserType, "student" | "faculty">;
+  userType: Extract<UserType, "student" | "faculty" | "admin">;
 }
 
 const ROLE_BADGE: Record<string, string> = {

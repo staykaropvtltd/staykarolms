@@ -45,6 +45,7 @@ const adminMenu: MenuItem[] = [
   { path: "tests",          label: "Tests",         icon: ClipboardList },
   { path: "analytics",      label: "Analytics",     icon: BarChart3 },
   { path: "certificates",   label: "Certificates",  icon: Award },
+  { path: "messages",       label: "Messages",      icon: MessageSquare },
   { path: "notifications",  label: "Notifications", icon: Bell },
   { path: "ai-interviewer", label: "AI Interviewer",icon: Mic },
   { path: "support",        label: "Support",       icon: LifeBuoy },

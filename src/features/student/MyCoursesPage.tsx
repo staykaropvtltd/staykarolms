@@ -224,6 +224,19 @@ export function MyCoursesPage() {
   const [tab, setTab] = useState<"player" | "overview">("player");
   const [notes, setNotes] = useState("");
 
+  useEffect(() => {
+    if (activeLesson) {
+      const saved = localStorage.getItem(`lesson-notes-${activeLesson.id}`) || "";
+      setNotes(saved);
+    }
+  }, [activeLesson?.id]);
+
+  const handleSaveNotes = () => {
+    if (!activeLesson) return;
+    localStorage.setItem(`lesson-notes-${activeLesson.id}`, notes);
+    toast.success("Notes saved!");
+  };
+
   const handleMarkComplete = async () => {
     if (!selectedCourse || !activeLesson) return;
     
@@ -468,7 +481,7 @@ export function MyCoursesPage() {
                   placeholder="Take notes while watching…"
                   className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm resize-none"
                 />
-                <Button size="sm" variant="outline" className="mt-2">Save Notes</Button>
+                <Button size="sm" variant="outline" className="mt-2" onClick={handleSaveNotes}>Save Notes</Button>
               </div>
             </div>
           )}

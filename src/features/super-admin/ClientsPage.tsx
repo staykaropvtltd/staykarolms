@@ -125,8 +125,8 @@ function ManageTenantModal({ tenant, onClose }: { tenant: Tenant; onClose: () =>
           </div>
         </div>
         <div className="flex gap-2 p-6 pt-0">
-          <Button className="flex-1">Save Changes</Button>
-          <Button variant="outline" className="gap-1.5"><ExternalLink className="w-3.5 h-3.5" /> Open Portal</Button>
+          <Button className="flex-1" onClick={() => { toast.success("Changes saved!"); onClose(); }}>Save Changes</Button>
+          <Button variant="outline" className="gap-1.5" onClick={() => toast.info("Portal access requires admin credentials")}><ExternalLink className="w-3.5 h-3.5" /> Open Portal</Button>
           <Button variant="outline" onClick={onClose}>Close</Button>
         </div>
       </div>
