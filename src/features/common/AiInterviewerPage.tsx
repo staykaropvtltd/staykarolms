@@ -376,6 +376,8 @@ export function AiInterviewerPage({ userType }: AiInterviewerPageProps) {
   const [sessionActive, setSessionActive] = useState(false);
   const [sessionEnded, setSessionEnded] = useState(false);
   const [currentQ, setCurrentQ] = useState(0);
+  // Snapshot of questions at session start — prevents index mismatch if DB questions reload
+  const [sessionQuestions, setSessionQuestions] = useState<InterviewQuestion[]>([]);
   const [timeLeft, setTimeLeft] = useState(DURATION_OPTS["30 minutes"]);
   const [answers, setAnswers] = useState<string[]>([]);
   const [submittedQs, setSubmittedQs] = useState<boolean[]>([]);
@@ -391,8 +393,11 @@ export function AiInterviewerPage({ userType }: AiInterviewerPageProps) {
     setQuestionsLoading(true);
     try {
       const { data } = await getInterviewQuestions();
-      if (data && data.length > 0) {
-        setQuestions(data);
+      const valid = (Array.isArray(data) ? data : []).filter(
+        (q): q is InterviewQuestion => q != null && typeof q.question === "string"
+      );
+      if (valid.length > 0) {
+        setQuestions(valid);
       } else {
         setQuestions(isStudent ? FALLBACK_QUESTIONS : []);
       }
@@ -432,8 +437,9 @@ export function AiInterviewerPage({ userType }: AiInterviewerPageProps) {
   }, [sessionActive, sessionEnded]);
 
   const startSession = () => {
-    const qs = questions.length > 0 ? questions : FALLBACK_QUESTIONS;
+    const qs = (questions.length > 0 ? questions : FALLBACK_QUESTIONS).filter(Boolean);
     const secs = DURATION_OPTS[selectedDuration];
+    setSessionQuestions(qs);
     setTimeLeft(secs);
     setCurrentQ(0);
     setAnswers(Array(qs.length).fill(""));
@@ -445,7 +451,7 @@ export function AiInterviewerPage({ userType }: AiInterviewerPageProps) {
 
   const endSession = async () => {
     if (timerRef.current) clearInterval(timerRef.current);
-    const qs = questions.length > 0 ? questions : FALLBACK_QUESTIONS;
+    const qs = sessionQuestions.length > 0 ? sessionQuestions : FALLBACK_QUESTIONS;
     const answeredCount = submittedQs.filter(Boolean).length;
     const score = Math.round((answeredCount / qs.length) * 100);
     setSessionScore(score);
@@ -458,7 +464,7 @@ export function AiInterviewerPage({ userType }: AiInterviewerPageProps) {
   };
 
   const handleSubmitAnswer = () => {
-    const qs = questions.length > 0 ? questions : FALLBACK_QUESTIONS;
+    const qs = sessionQuestions.length > 0 ? sessionQuestions : FALLBACK_QUESTIONS;
     const updated = [...submittedQs];
     updated[currentQ] = true;
     setSubmittedQs(updated);
@@ -467,7 +473,7 @@ export function AiInterviewerPage({ userType }: AiInterviewerPageProps) {
   };
 
   const handleSkip = () => {
-    const qs = questions.length > 0 ? questions : FALLBACK_QUESTIONS;
+    const qs = sessionQuestions.length > 0 ? sessionQuestions : FALLBACK_QUESTIONS;
     if (currentQ < qs.length - 1) setCurrentQ(p => p + 1);
   };
 
@@ -494,7 +500,7 @@ export function AiInterviewerPage({ userType }: AiInterviewerPageProps) {
 
   // ── ACTIVE SESSION (students only) ─────────────────────────────────────────
   if (isStudent && sessionActive) {
-    const q = activeQuestions[currentQ];
+    const q = sessionQuestions[currentQ];
     if (!q) return null;
     const isCodeQ = CODE_CATEGORIES.includes(q.category);
 
@@ -538,7 +544,7 @@ export function AiInterviewerPage({ userType }: AiInterviewerPageProps) {
                     <div className="text-xs text-muted-foreground mt-1">Overall Score</div>
                   </div>
                   <div className="bg-card border border-border rounded-xl p-4 text-center">
-                    <div className="text-3xl font-bold">{answeredCount}<span className="text-base text-foreground">/{activeQuestions.length}</span></div>
+                    <div className="text-3xl font-bold">{answeredCount}<span className="text-base text-foreground">/{sessionQuestions.length}</span></div>
                     <div className="text-xs text-muted-foreground mt-1">Answered</div>
                   </div>
                   <div className="bg-card border border-border rounded-xl p-4 text-center">
@@ -566,7 +572,7 @@ export function AiInterviewerPage({ userType }: AiInterviewerPageProps) {
                 <div className="bg-card border border-border rounded-xl overflow-hidden">
                   <div className="px-6 py-3 border-b border-border font-semibold">Per-question Review</div>
                   <div className="divide-y divide-border">
-                    {activeQuestions.map((aq, idx) => (
+                    {sessionQuestions.map((aq, idx) => (
                       <div key={aq.id} className="px-6 py-4 flex items-start gap-4">
                         <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${submittedQs[idx] ? "bg-green-500/10 text-green-500" : "bg-muted text-muted-foreground"}`}>
                           {submittedQs[idx] ? <CheckCircle2 className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
@@ -593,7 +599,7 @@ export function AiInterviewerPage({ userType }: AiInterviewerPageProps) {
               <div className="col-span-1 border-r border-border bg-card overflow-y-auto p-4">
                 <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3 px-2">Questions</p>
                 <div className="space-y-1">
-                  {activeQuestions.map((aq, idx) => {
+                  {sessionQuestions.map((aq, idx) => {
                     const isActive = currentQ === idx;
                     const isDone = submittedQs[idx];
                     return (
@@ -622,7 +628,7 @@ export function AiInterviewerPage({ userType }: AiInterviewerPageProps) {
                       <div className="flex items-center gap-2 mb-3">
                         <span className={`text-xs px-2.5 py-0.5 rounded-full font-medium ${CAT_COLORS[q.category] || "bg-muted text-muted-foreground"}`}>{q.category}</span>
                         <span className={`text-xs px-2.5 py-0.5 rounded-full font-medium ${DIFF_COLORS[q.difficulty] || "bg-muted text-muted-foreground"}`}>{q.difficulty}</span>
-                        <span className="text-xs text-muted-foreground ml-auto">Question {currentQ + 1} of {activeQuestions.length}</span>
+                        <span className="text-xs text-muted-foreground ml-auto">Question {currentQ + 1} of {sessionQuestions.length}</span>
                       </div>
                       <h2 className="text-lg font-semibold leading-snug">{q.question}</h2>
                     </div>
@@ -652,12 +658,12 @@ export function AiInterviewerPage({ userType }: AiInterviewerPageProps) {
                         />
                       )}
                       <div className="flex justify-between items-center">
-                        <Button variant="outline" size="sm" onClick={handleSkip} disabled={currentQ === activeQuestions.length - 1} className="gap-2">
+                        <Button variant="outline" size="sm" onClick={handleSkip} disabled={currentQ === sessionQuestions.length - 1} className="gap-2">
                           <SkipForward className="w-4 h-4" /> Skip
                         </Button>
                         <Button size="sm" style={{ background: "var(--gold)", color: "#1A1A1A" }} className="hover:opacity-90 gap-2" onClick={handleSubmitAnswer}>
                           <CheckCircle2 className="w-4 h-4" />
-                          {currentQ === activeQuestions.length - 1 ? "Submit & Finish" : "Submit Answer"}
+                          {currentQ === sessionQuestions.length - 1 ? "Submit & Finish" : "Submit Answer"}
                         </Button>
                       </div>
                     </div>
@@ -671,7 +677,7 @@ export function AiInterviewerPage({ userType }: AiInterviewerPageProps) {
                   <MicVisualizer />
                   <p className="text-xs text-muted-foreground">AI is listening...</p>
                   <div className="ml-auto text-xs text-muted-foreground">
-                    {submittedQs.filter(Boolean).length}/{activeQuestions.length} answered
+                    {submittedQs.filter(Boolean).length}/{sessionQuestions.length} answered
                   </div>
                 </div>
               </div>
