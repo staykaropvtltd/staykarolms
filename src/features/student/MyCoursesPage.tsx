@@ -444,11 +444,17 @@ export function MyCoursesPage() {
                     <p className="text-sm text-muted-foreground">{activeLesson.duration} · {activeLesson.type}</p>
                   </div>
                   <div className="flex gap-2">
-                    <Button variant="outline" size="sm">← Prev</Button>
+                    <Button variant="outline" size="sm" onClick={() => {
+                      const idx = allLessons.findIndex(l => l.id === activeLesson.id);
+                      if (idx > 0) setActiveLesson(allLessons[idx - 1]);
+                    }} disabled={allLessons.findIndex(l => l.id === activeLesson.id) === 0}>← Prev</Button>
                     <Button size="sm" className="gap-1.5" onClick={handleMarkComplete} disabled={activeLesson.completed}>
                       <CheckCircle className="w-3.5 h-3.5" /> {activeLesson.completed ? "Completed" : "Mark Complete"}
                     </Button>
-                    <Button variant="outline" size="sm">Next →</Button>
+                    <Button variant="outline" size="sm" onClick={() => {
+                      const idx = allLessons.findIndex(l => l.id === activeLesson.id);
+                      if (idx < allLessons.length - 1) setActiveLesson(allLessons[idx + 1]);
+                    }} disabled={allLessons.findIndex(l => l.id === activeLesson.id) === allLessons.length - 1}>Next →</Button>
                   </div>
                 </div>
               )}

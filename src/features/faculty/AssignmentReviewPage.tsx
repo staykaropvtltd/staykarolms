@@ -53,7 +53,7 @@ function GradeModal({ submission, onClose, onSuccess }: { submission: any; onClo
               <p className="text-sm font-medium text-foreground">{submission.file_url}</p>
               <p className="text-xs text-muted-foreground">Submitted {new Date(submission.submitted_at).toLocaleString()}</p>
             </div>
-            <Button size="sm" variant="outline" className="gap-1.5" onClick={() => toast.success(`Downloading ${submission.file_url}…`)}>
+            <Button size="sm" variant="outline" className="gap-1.5" onClick={() => submission.file_url ? window.open(submission.file_url, "_blank", "noopener,noreferrer") : toast.error("No file attached")}>
               <Download className="w-3.5 h-3.5" /> Download
             </Button>
           </div>
@@ -230,7 +230,7 @@ export function AssignmentReviewPage() {
                     </div>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
-                    <Button size="sm" variant="outline" className="gap-1.5" onClick={() => toast.success(`Downloading ${sub.file_url}…`)}>
+                    <Button size="sm" variant="outline" className="gap-1.5" onClick={() => sub.file_url ? window.open(sub.file_url, "_blank", "noopener,noreferrer") : toast.error("No file attached")}>
                       <Download className="w-3.5 h-3.5" /> File
                     </Button>
                     {sub.uiStatus === "Pending" && (

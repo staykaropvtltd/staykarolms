@@ -1,6 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { Plus, Search, Filter, ClipboardList, Clock, Calendar, CheckCircle2, ChevronRight, GripVertical, Trash2, Edit2, Play, Users, Loader2 } from "lucide-react";
+import { Plus, Search, Filter, ClipboardList, Clock, Calendar, CheckCircle2, ChevronRight, GripVertical, Trash2, Edit2, Play, Users, Loader2, Upload, FileText } from "lucide-react";
 import type { UserType } from "@/shared/userTypes";
 import { getTests, createTest, addTestQuestion, publishTest, getBatches } from "@/shared/lib/api";
 import { toast } from "sonner";
@@ -405,8 +405,142 @@ function Step1Details({ formData, setFormData, onNext, batches = [] }: any) {
   );
 }
 
+// ── CSV / JSON question parser ────────────────────────────────────────────────
+
+function parseQuestionsFile(text: string, filename: string): { questions: any[]; errors: string[] } {
+  const questions: any[] = [];
+  const errors: string[] = [];
+
+  if (filename.endsWith(".json")) {
+    try {
+      const data = JSON.parse(text);
+      const arr = Array.isArray(data) ? data : data.questions || [];
+      arr.forEach((q: any, i: number) => {
+        if (!q.question) { errors.push(`Item ${i + 1}: missing "question" field`); return; }
+        questions.push({
+          id: Date.now().toString() + i,
+          type: q.type || "mcq",
+          question: q.question,
+          marks: Number(q.marks) || 1,
+          options: q.options || ["", "", "", ""],
+          correct_answer: q.correct_answer !== undefined ? String(q.correct_answer) : "0",
+        });
+      });
+    } catch {
+      errors.push("Invalid JSON file");
+    }
+  } else {
+    // CSV: type,question,option_a,option_b,option_c,option_d,correct,marks
+    const lines = text.split(/[\r\n]+/).map(l => l.trim()).filter(Boolean);
+    let start = 0;
+    if (lines[0] && /type|question/i.test(lines[0])) start = 1;
+    lines.slice(start).forEach((line, idx) => {
+      const cols = line.split(",").map(c => c.trim().replace(/^["']|["']$/g, ""));
+      const [type, question, optA, optB, optC, optD, correct, marksStr] = cols;
+      if (!question) { errors.push(`Row ${idx + start + 2}: missing question`); return; }
+      const qType = (type || "mcq").toLowerCase();
+      const marks = Number(marksStr) || 1;
+      const correctIdx = correct
+        ? ["a", "b", "c", "d"].indexOf(correct.toLowerCase().trim())
+        : 0;
+      questions.push({
+        id: Date.now().toString() + idx,
+        type: qType,
+        question,
+        marks,
+        options: [optA || "", optB || "", optC || "", optD || ""],
+        correct_answer: correctIdx >= 0 ? String(correctIdx) : "0",
+      });
+    });
+  }
+  return { questions, errors };
+}
+
+function ImportQuestionsModal({ onClose, onImported }: { onClose: () => void; onImported: (qs: any[]) => void }) {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [preview, setPreview] = useState<{ questions: any[]; errors: string[] } | null>(null);
+  const [filename, setFilename] = useState("");
+
+  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setFilename(file.name);
+    const reader = new FileReader();
+    reader.onload = ev => {
+      const result = parseQuestionsFile(ev.target?.result as string, file.name);
+      setPreview(result);
+    };
+    reader.readAsText(file);
+  };
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+      <div className="bg-card border border-border rounded-xl w-full max-w-lg shadow-xl">
+        <div className="flex items-center justify-between p-5 border-b border-border">
+          <h3 className="font-semibold text-foreground">Import Questions from File</h3>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground"><Trash2 className="w-4 h-4" /></button>
+        </div>
+        <div className="p-5 space-y-4">
+          <div className="text-xs text-muted-foreground bg-muted/40 rounded-lg p-3 space-y-1">
+            <p className="font-medium text-foreground">Supported formats:</p>
+            <p><span className="font-mono bg-muted px-1 rounded">.csv</span> — columns: <span className="font-mono">type, question, option_a, option_b, option_c, option_d, correct (a/b/c/d), marks</span></p>
+            <p><span className="font-mono bg-muted px-1 rounded">.json</span> — array of <span className="font-mono">{"{ type, question, options[], correct_answer, marks }"}</span></p>
+          </div>
+
+          <div
+            className="border-2 border-dashed border-border rounded-xl p-8 text-center cursor-pointer hover:border-primary/50 hover:bg-accent/10 transition-colors"
+            onClick={() => fileRef.current?.click()}
+          >
+            <Upload className="w-8 h-8 mx-auto mb-2 text-muted-foreground" />
+            <p className="text-sm font-medium text-foreground">{filename || "Click to upload CSV or JSON"}</p>
+            <p className="text-xs text-muted-foreground mt-1">Supports .csv and .json</p>
+            <input ref={fileRef} type="file" accept=".csv,.json,.txt" className="hidden" onChange={handleFile} />
+          </div>
+
+          {preview && (
+            <div className="rounded-lg border border-border overflow-hidden text-sm">
+              {preview.questions.length > 0 && (
+                <div className="p-3 bg-[var(--gold-muted)]">
+                  <p className="font-medium text-foreground">{preview.questions.length} question{preview.questions.length !== 1 ? "s" : ""} ready to import</p>
+                  <div className="mt-1 max-h-24 overflow-y-auto space-y-0.5">
+                    {preview.questions.slice(0, 4).map((q, i) => (
+                      <p key={i} className="text-xs text-muted-foreground truncate">Q{i + 1}: [{q.type.toUpperCase()}] {q.question}</p>
+                    ))}
+                    {preview.questions.length > 4 && <p className="text-xs text-muted-foreground">+{preview.questions.length - 4} more…</p>}
+                  </div>
+                </div>
+              )}
+              {preview.errors.length > 0 && (
+                <div className="p-3 bg-red-500/5 border-t border-border">
+                  <p className="text-xs font-medium text-red-500">{preview.errors.length} row{preview.errors.length !== 1 ? "s" : ""} skipped</p>
+                  {preview.errors.slice(0, 3).map((e, i) => <p key={i} className="text-xs text-muted-foreground">{e}</p>)}
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="flex gap-2 pt-1">
+            <button
+              className="flex-1 py-2 text-sm font-bold rounded-xl text-[#1A1A1A] disabled:opacity-50"
+              style={{ background: "var(--gold)" }}
+              disabled={!preview || preview.questions.length === 0}
+              onClick={() => { if (preview) { onImported(preview.questions); onClose(); } }}
+            >
+              Add {preview?.questions.length ?? 0} Questions
+            </button>
+            <button onClick={onClose} className="px-4 py-2 text-sm font-semibold border border-border rounded-xl hover:bg-muted transition-colors">
+              Cancel
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Step2Questions({ questions, setQuestions, onNext, onPrev }: any) {
   const [isAdding, setIsAdding] = useState(false);
+  const [showImport, setShowImport] = useState(false);
   const [newQ, setNewQ] = useState({ type: "mcq", question: "", marks: 1, options: ["", "", "", ""], correct_answer: "0" });
 
   const handleAdd = () => {
@@ -417,9 +551,23 @@ function Step2Questions({ questions, setQuestions, onNext, onPrev }: any) {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="text-xl font-bold mb-1">Questions</h2>
-        <p className="text-sm text-muted-foreground">Add questions to your test.</p>
+      {showImport && (
+        <ImportQuestionsModal
+          onClose={() => setShowImport(false)}
+          onImported={qs => setQuestions([...questions, ...qs])}
+        />
+      )}
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h2 className="text-xl font-bold mb-1">Questions</h2>
+          <p className="text-sm text-muted-foreground">Add questions manually or import from CSV / JSON.</p>
+        </div>
+        <button
+          onClick={() => setShowImport(true)}
+          className="flex items-center gap-2 px-4 py-2 text-sm font-semibold border border-border rounded-xl hover:bg-muted transition-colors shrink-0"
+        >
+          <Upload className="w-4 h-4" /> Import File
+        </button>
       </div>
 
       <div className="space-y-4">

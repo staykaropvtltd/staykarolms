@@ -40,6 +40,24 @@ interface StudentAttendance {
   records: Record<string, AttendanceStatus>;
 }
 
+function exportAttendanceCSV(records: StudentAttendance[], dates: string[], courseName: string) {
+  const header = ["Student", ...dates, "Rate"].join(",");
+  const rows = records.map(r => {
+    const present = dates.filter(d => r.records[d] === "Present").length;
+    const late = dates.filter(d => r.records[d] === "Late").length;
+    const rate = dates.length > 0 ? Math.round(((present + late) / dates.length) * 100) : 0;
+    return [r.studentName, ...dates.map(d => r.records[d] ?? "Absent"), `${rate}%`].join(",");
+  });
+  const csv = [header, ...rows].join("\n");
+  const blob = new Blob([csv], { type: "text/csv" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `attendance-${courseName.replace(/\s+/g, "-")}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 export function AttendancePage() {
   const [courses, setCourses] = useState<any[]>([]);
   const [selectedCourseId, setSelectedCourseId] = useState<string | null>(null);
@@ -144,7 +162,11 @@ export function AttendancePage() {
         title="Attendance"
         description="Mark and track student attendance across all your sessions."
         actions={
-          <Button variant="outline" size="sm" className="gap-2" onClick={() => toast.success("Attendance exported as CSV")}>
+          <Button variant="outline" size="sm" className="gap-2" onClick={() => {
+            const course = courses.find(c => c.id === selectedCourseId);
+            exportAttendanceCSV(records, ATTENDANCE_DATES, course?.title || "attendance");
+            toast.success("Attendance exported as CSV");
+          }} disabled={records.length === 0}>
             <Download className="size-4" /> Export CSV
           </Button>
         }
