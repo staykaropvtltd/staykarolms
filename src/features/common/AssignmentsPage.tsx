@@ -71,24 +71,33 @@ function CreateAssignmentModal({ onClose, onCreated }: { onClose: () => void; on
     });
   }, []);
 
+  const toISOSafe = (s?: string) => {
+    if (!s) return undefined;
+    const d = new Date(s);
+    return isNaN(d.getTime()) ? undefined : d.toISOString();
+  };
+
   const handleCreate = async () => {
     if (!form.title.trim()) return;
     setLoading(true);
-    const { error } = await createAssignment({
-      title: form.title,
-      description: form.description,
-      course_id: form.course_id || undefined,
-      due_date: form.due_date ? new Date(form.due_date).toISOString() : undefined,
-      max_marks: form.max_marks,
-    });
-    setLoading(false);
-    if (error) {
-      toast.error(error);
-    } else {
-      toast.success("Assignment created! Students will be notified.");
-      onCreated();
-      onClose();
+    try {
+      const { error } = await createAssignment({
+        title: form.title,
+        description: form.description,
+        course_id: form.course_id || undefined,
+        due_date: toISOSafe(form.due_date),
+        max_marks: form.max_marks,
+      });
+      if (error) toast.error(error);
+      else {
+        toast.success("Assignment created! Students will be notified.");
+        onCreated();
+        onClose();
+      }
+    } catch (err: any) {
+      toast.error(err.message || "Failed to create assignment");
     }
+    setLoading(false);
   };
 
   return (
@@ -269,14 +278,18 @@ function ImportAssignmentsModal({ onClose, onCreated }: { onClose: () => void; o
     let succeeded = 0;
     for (let i = 0; i < parsed.length; i++) {
       const a = parsed[i];
-      const { error } = await createAssignment({
-        title: a.title,
-        description: a.description,
-        course_id: a.course_id || undefined,
-        due_date: a.due_date ? new Date(a.due_date).toISOString() : undefined,
-        max_marks: a.max_marks,
-      });
-      if (!error) succeeded++;
+      try {
+        const { error } = await createAssignment({
+          title: a.title,
+          description: a.description,
+          course_id: a.course_id || undefined,
+          due_date: toISOSafe(a.due_date),
+          max_marks: a.max_marks,
+        });
+        if (!error) succeeded++;
+      } catch {
+        // skip rows that fail, continue import
+      }
       setProgress({ done: i + 1, total: parsed.length });
     }
     setImporting(false);
