@@ -29,9 +29,12 @@ async function authenticate(req, res, next) {
       return res.status(401).json({ error: "Invalid or expired token" });
     }
 
+    // Fetch only the fields needed for auth/role decisions.
+    // avatar_url is a large string and only needed in /api/auth/me responses,
+    // not for every authenticated request.
     const { data: profile, error: profileError } = await supabase
       .from("profiles")
-      .select("id, name, email, role, institution_id, avatar_url")
+      .select("id, name, email, role, institution_id")
       .eq("id", user.id)
       .single();
 

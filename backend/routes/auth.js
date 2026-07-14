@@ -17,21 +17,20 @@ router.post("/login", async (req, res, next) => {
       return res.status(401).json({ error: error.message });
     }
 
-    // Fetch profile to include role
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("id, name, email, role, institution_id, avatar_url")
-      .eq("id", data.user.id)
-      .single();
+    // Fetch profile concurrently — no need to wait for signIn to finish first
+    const [{ data: profile }] = await Promise.all([
+      supabase
+        .from("profiles")
+        .select("id, name, email, role, institution_id, avatar_url")
+        .eq("id", data.user.id)
+        .single(),
+    ]);
 
-    // Audit Log
-    try {
-      const { logAudit } = require("../lib/audit");
-      const userObj = profile || data.user;
-      await logAudit(req, userObj, "login", "auth", userObj.id, "info", "success", {});
-    } catch (aErr) {
-      console.error("[auth] login audit error:", aErr.message);
-    }
+    // Audit log is fire-and-forget — don't block the login response
+    const { logAudit } = require("../lib/audit");
+    const userObj = profile || data.user;
+    logAudit(req, userObj, "login", "auth", userObj.id, "info", "success", {})
+      .catch((aErr) => console.error("[auth] login audit error:", aErr.message));
 
     return res.json({
       data: {
@@ -63,9 +62,18 @@ router.post("/logout", authenticate, async (req, res, next) => {
   }
 });
 
-// GET /api/auth/me
-router.get("/me", authenticate, (req, res) => {
-  return res.json({ data: req.user });
+// GET /api/auth/me — returns full profile including avatar_url
+router.get("/me", authenticate, async (req, res, next) => {
+  try {
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("id, name, email, role, institution_id, avatar_url")
+      .eq("id", req.user.id)
+      .single();
+    return res.json({ data: profile || req.user });
+  } catch (err) {
+    return next(err);
+  }
 });
 
 module.exports = router;

@@ -1,0 +1,598 @@
+{
+  "root_group": {
+    "checks": [],
+    "name": "",
+    "path": "",
+    "id": "d41d8cd98f00b204e9800998ecf8427e",
+    "groups": [
+        {
+          "groups": [],
+          "checks": [
+              {
+                "name": "login: status 200",
+                "path": "::setup::login: status 200",
+                "id": "638c85000baaeede3d6e857733f783df",
+                "passes": 1,
+                "fails": 0
+              },
+              {
+                "name": "login: token in body",
+                "path": "::setup::login: token in body",
+                "id": "1b74c5b77bf1839e5c5a5664e24f66b6",
+                "passes": 1,
+                "fails": 0
+              }
+            ],
+          "name": "setup",
+          "path": "::setup",
+          "id": "5c0f8025f7e0b6654089e5b00e950f1a"
+        },
+        {
+          "name": "health",
+          "path": "::health",
+          "id": "612cc1c9a7c3d7996d1eb6414fb9c69d",
+          "groups": [],
+          "checks": [
+              {
+                "passes": 10,
+                "fails": 0,
+                "name": "health 200",
+                "path": "::health::health 200",
+                "id": "1923beb3f69502def2b065e42e13b3e0"
+              }
+            ]
+        },
+        {
+          "name": "auth",
+          "path": "::auth",
+          "id": "7974aac4a665813eaeed4ec3fc0411a7",
+          "groups": [],
+          "checks": []
+        },
+        {
+          "name": "analytics",
+          "path": "::analytics",
+          "id": "d54455b341cd082f0fd361293669d622",
+          "groups": [],
+          "checks": [
+              {
+                "path": "::analytics::GET /api/analytics/admin < 500",
+                "id": "2f5bf95dabf8ab86fbeeda9c0a532797",
+                "passes": 10,
+                "fails": 0,
+                "name": "GET /api/analytics/admin < 500"
+              }
+            ]
+        },
+        {
+          "name": "courses",
+          "path": "::courses",
+          "id": "17745885dd1eb64545e62107648bdd68",
+          "groups": [],
+          "checks": [
+              {
+                "name": "GET /api/courses/77ed32c1-ab88-4f44-8d8f-577209e65d9d < 500",
+                "path": "::courses::GET /api/courses/77ed32c1-ab88-4f44-8d8f-577209e65d9d < 500",
+                "id": "f6b2097d6882bcccbfc3fe976b16a03f",
+                "passes": 10,
+                "fails": 0
+              },
+              {
+                "name": "GET /api/courses/77ed32c1-ab88-4f44-8d8f-577209e65d9d/content < 500",
+                "path": "::courses::GET /api/courses/77ed32c1-ab88-4f44-8d8f-577209e65d9d/content < 500",
+                "id": "cd3bc263fabf8199ae652aebd7be4840",
+                "passes": 10,
+                "fails": 0
+              },
+              {
+                "name": "GET /api/courses/77ed32c1-ab88-4f44-8d8f-577209e65d9d/modules < 500",
+                "path": "::courses::GET /api/courses/77ed32c1-ab88-4f44-8d8f-577209e65d9d/modules < 500",
+                "id": "429be71483c1c1e7a6bd7ee75a7e8c33",
+                "passes": 10,
+                "fails": 0
+              },
+              {
+                "passes": 10,
+                "fails": 0,
+                "name": "GET /api/courses/77ed32c1-ab88-4f44-8d8f-577209e65d9d/students < 500",
+                "path": "::courses::GET /api/courses/77ed32c1-ab88-4f44-8d8f-577209e65d9d/students < 500",
+                "id": "7491941b416d692d4c5104ae20dd13a4"
+              }
+            ]
+        },
+        {
+          "name": "batches",
+          "path": "::batches",
+          "id": "6a9af7f0c0a2b55c07a3f6428f499a2d",
+          "groups": [],
+          "checks": [
+              {
+                "passes": 10,
+                "fails": 0,
+                "name": "GET /api/batches < 500",
+                "path": "::batches::GET /api/batches < 500",
+                "id": "ce0e7b17634af56b6469e8732749b09b"
+              },
+              {
+                "passes": 10,
+                "fails": 0,
+                "name": "GET /api/batches/6bbd2b05-6f69-4cb1-951e-f12491e26955 < 500",
+                "path": "::batches::GET /api/batches/6bbd2b05-6f69-4cb1-951e-f12491e26955 < 500",
+                "id": "e63a9aa75958f7858ae2b5577d38d11e"
+              },
+              {
+                "passes": 10,
+                "fails": 0,
+                "name": "GET /api/batches/6bbd2b05-6f69-4cb1-951e-f12491e26955/courses < 500",
+                "path": "::batches::GET /api/batches/6bbd2b05-6f69-4cb1-951e-f12491e26955/courses < 500",
+                "id": "779331269816445a4347e35365576fcd"
+              }
+            ]
+        },
+        {
+          "id": "df7e3e207a3ce87596b827f68803415a",
+          "groups": [],
+          "checks": [],
+          "name": "tests",
+          "path": "::tests"
+        },
+        {
+          "groups": [],
+          "checks": [],
+          "name": "assignments",
+          "path": "::assignments",
+          "id": "309a0d17926eab4574138c4f89ef7aa1"
+        },
+        {
+          "groups": [],
+          "checks": [],
+          "name": "submissions",
+          "path": "::submissions",
+          "id": "dfbea503de44acdc081e536bce769970"
+        },
+        {
+          "path": "::attendance",
+          "id": "ea2918c8a5d07f2bb41582416287a192",
+          "groups": [],
+          "checks": [
+              {
+                "path": "::attendance::GET /api/attendance/course/77ed32c1-ab88-4f44-8d8f-577209e65d9d < 500",
+                "id": "1b9b36fccd3684a7f8e0127201c2f293",
+                "passes": 10,
+                "fails": 0,
+                "name": "GET /api/attendance/course/77ed32c1-ab88-4f44-8d8f-577209e65d9d < 500"
+              }
+            ],
+          "name": "attendance"
+        },
+        {
+          "name": "notifications",
+          "path": "::notifications",
+          "id": "ba4d3d2a4bfed33d7ca53f35bb028a22",
+          "groups": [],
+          "checks": []
+        },
+        {
+          "id": "076f647c1118f34ab6d2b248f8ae4e71",
+          "groups": [],
+          "checks": [],
+          "name": "messages",
+          "path": "::messages"
+        },
+        {
+          "groups": [],
+          "checks": [],
+          "name": "calendar",
+          "path": "::calendar",
+          "id": "140e54f08f7ce8f0a177b8ffba40896d"
+        },
+        {
+          "checks": [
+            {
+              "passes": 10,
+              "fails": 0,
+              "name": "GET /api/live-classes < 500",
+              "path": "::live-classes::GET /api/live-classes < 500",
+              "id": "e06b9ea043ef339b3337599480274cc3"
+            }
+          ],
+          "name": "live-classes",
+          "path": "::live-classes",
+          "id": "7e671e95497b4d676c0922011f9ea220",
+          "groups": []
+        },
+        {
+          "name": "ai-sessions",
+          "path": "::ai-sessions",
+          "id": "99c3e4c6ed2c44e956b65dbce90170db",
+          "groups": [],
+          "checks": []
+        },
+        {
+          "id": "7449cb7f0c81963e575c9b697111dc44",
+          "groups": [],
+          "checks": [
+              {
+                "fails": 0,
+                "name": "GET /api/ai-questions < 500",
+                "path": "::ai-questions::GET /api/ai-questions < 500",
+                "id": "ca1b312e51b2a4c01ca6c9786be9e8a8",
+                "passes": 10
+              }
+            ],
+          "name": "ai-questions",
+          "path": "::ai-questions"
+        },
+        {
+          "id": "ed21ee6a2999d736543df0cf202b35f4",
+          "groups": [],
+          "checks": [],
+          "name": "certificates",
+          "path": "::certificates"
+        },
+        {
+          "path": "::support-tickets",
+          "id": "127265bda1bb24da37512eb32f3e92ee",
+          "groups": [],
+          "checks": [],
+          "name": "support-tickets"
+        },
+        {
+          "name": "users",
+          "path": "::users",
+          "id": "56713dd9a24fad672d64226f5275b061",
+          "groups": [],
+          "checks": [
+              {
+                "passes": 10,
+                "fails": 0,
+                "name": "GET /api/users < 500",
+                "path": "::users::GET /api/users < 500",
+                "id": "e118cc5208f8150db936fbae8499160d"
+              },
+              {
+                "fails": 0,
+                "name": "GET /api/users/6f76e282-0de4-43d0-8b38-f50eb8da0e5e < 500",
+                "path": "::users::GET /api/users/6f76e282-0de4-43d0-8b38-f50eb8da0e5e < 500",
+                "id": "f45cce5d49e1b4c2646b8a7c6b680b4f",
+                "passes": 10
+              }
+            ]
+        },
+        {
+          "id": "8261e809c094534b7fdf66cfd0dca5d3",
+          "groups": [],
+          "checks": [
+              {
+                "name": "GET /api/institutions < 500",
+                "path": "::institutions::GET /api/institutions < 500",
+                "id": "98e1e339ee541d30e44960a6d1a50c1b",
+                "passes": 10,
+                "fails": 0
+              }
+            ],
+          "name": "institutions",
+          "path": "::institutions"
+        },
+        {
+          "groups": [],
+          "checks": [
+              {
+                "passes": 10,
+                "fails": 0,
+                "name": "GET /api/billing < 500",
+                "path": "::billing::GET /api/billing < 500",
+                "id": "d9c11a0e8cd83747382dc5a6ff61e616"
+              }
+            ],
+          "name": "billing",
+          "path": "::billing",
+          "id": "70c9b430b29eaf8234a1e6bec28f2568"
+        }
+      ]
+  },
+  "options": {
+    "summaryTrendStats": [
+      "avg",
+      "min",
+      "med",
+      "max",
+      "p(90)",
+      "p(95)"
+    ],
+    "summaryTimeUnit": "",
+    "noColor": false
+  },
+  "state": {
+    "isStdOutTTY": false,
+    "isStdErrTTY": false,
+    "testRunDurationMs": 260008.1753
+  },
+  "metrics": {
+    "http_req_duration{endpoint:login}": {
+      "type": "trend",
+      "contains": "time",
+      "values": {
+        "avg": 4540.5767,
+        "min": 4540.5767,
+        "med": 4540.5767,
+        "max": 4540.5767,
+        "p(90)": 4540.5767,
+        "p(95)": 4540.5767
+      },
+      "thresholds": {
+        "p(95)<2000": {
+          "ok": false
+        }
+      }
+    },
+    "checks": {
+      "type": "rate",
+      "contains": "default",
+      "values": {
+        "rate": 1,
+        "passes": 162,
+        "fails": 0
+      }
+    },
+    "iteration_duration": {
+      "type": "trend",
+      "contains": "time",
+      "values": {
+        "max": 29129.9298,
+        "p(90)": 28609.77741,
+        "p(95)": 28869.853605,
+        "avg": 24828.326080000003,
+        "min": 21056.8834,
+        "med": 25012.92105
+      }
+    },
+    "vus_max": {
+      "type": "gauge",
+      "contains": "default",
+      "values": {
+        "min": 1,
+        "max": 1,
+        "value": 1
+      }
+    },
+    "http_req_sending": {
+      "type": "trend",
+      "contains": "time",
+      "values": {
+        "avg": 0.1859293413173652,
+        "min": 0,
+        "med": 0,
+        "max": 0.7071,
+        "p(90)": 0.48112,
+        "p(95)": 0.5194699999999998
+      }
+    },
+    "data_received": {
+      "type": "counter",
+      "contains": "data",
+      "values": {
+        "count": 176563,
+        "rate": 679.0671093179277
+      }
+    },
+    "http_req_duration": {
+      "type": "trend",
+      "contains": "time",
+      "values": {
+        "min": 246.2128,
+        "med": 1007.2802,
+        "max": 5985.6897,
+        "p(90)": 1654.70168,
+        "p(95)": 3975.802209999995,
+        "avg": 1134.655554491018
+      },
+      "thresholds": {
+        "p(95)<5000": {
+          "ok": true
+        }
+      }
+    },
+    "vus": {
+      "type": "gauge",
+      "contains": "default",
+      "values": {
+        "max": 1,
+        "value": 1,
+        "min": 0
+      }
+    },
+    "iterations": {
+      "type": "counter",
+      "contains": "default",
+      "values": {
+        "count": 10,
+        "rate": 0.03846032913565853
+      }
+    },
+    "group_duration": {
+      "values": {
+        "avg": 1141.3877505,
+        "min": 0,
+        "med": 398.52575,
+        "max": 6486.3324,
+        "p(90)": 3758.83471,
+        "p(95)": 5145.229004999999
+      },
+      "type": "trend",
+      "contains": "time"
+    },
+    "http_req_duration{endpoint:health}": {
+      "type": "trend",
+      "contains": "time",
+      "values": {
+        "p(95)": 2006.5511399999994,
+        "avg": 1435.76409,
+        "min": 868.5935,
+        "med": 1359.77775,
+        "max": 2288.4837,
+        "p(90)": 1724.6185799999996
+      },
+      "thresholds": {
+        "p(95)<500": {
+          "ok": false
+        }
+      }
+    },
+    "http_req_connecting": {
+      "type": "trend",
+      "contains": "time",
+      "values": {
+        "min": 0,
+        "med": 0,
+        "max": 24.9703,
+        "p(90)": 0,
+        "p(95)": 0,
+        "avg": 0.19366706586826346
+      }
+    },
+    "http_req_waiting": {
+      "type": "trend",
+      "contains": "time",
+      "values": {
+        "p(90)": 1652.35336,
+        "p(95)": 3971.7040499999953,
+        "avg": 1128.027109580838,
+        "min": 246.2128,
+        "med": 1006.8458,
+        "max": 5982.5069
+      }
+    },
+    "http_req_duration{expected_response:true}": {
+      "type": "trend",
+      "contains": "time",
+      "values": {
+        "med": 1012.0276,
+        "max": 5985.6897,
+        "p(90)": 1734.9015800000009,
+        "p(95)": 4146.356179999998,
+        "avg": 1160.061556687898,
+        "min": 246.2128
+      }
+    },
+    "http_req_tls_handshaking": {
+      "type": "trend",
+      "contains": "time",
+      "values": {
+        "med": 0,
+        "max": 87.5052,
+        "p(90)": 0,
+        "p(95)": 0,
+        "avg": 0.8596155688622755,
+        "min": 0
+      }
+    },
+    "http_req_receiving": {
+      "contains": "time",
+      "values": {
+        "med": 0,
+        "max": 370.4248,
+        "p(90)": 8.759100000000002,
+        "p(95)": 12.533209999999995,
+        "avg": 6.442515568862275,
+        "min": 0
+      },
+      "type": "trend"
+    },
+    "http_req_failed": {
+      "thresholds": {
+        "rate<0.05": {
+          "ok": false
+        }
+      },
+      "type": "rate",
+      "contains": "default",
+      "values": {
+        "fails": 157,
+        "rate": 0.059880239520958084,
+        "passes": 10
+      }
+    },
+    "data_sent": {
+      "type": "counter",
+      "contains": "data",
+      "values": {
+        "count": 12812,
+        "rate": 49.275373688605704
+      }
+    },
+    "http_req_blocked": {
+      "type": "trend",
+      "contains": "time",
+      "values": {
+        "med": 0,
+        "max": 135.9347,
+        "p(90)": 0,
+        "p(95)": 0,
+        "avg": 1.1937568862275447,
+        "min": 0
+      }
+    },
+    "http_reqs": {
+      "values": {
+        "count": 167,
+        "rate": 0.6422874965654974
+      },
+      "type": "counter",
+      "contains": "default"
+    }
+  },
+  "setup_data": {
+    "credentials": {
+      "faculty": {
+        "email": "",
+        "password": ""
+      },
+      "student": {
+        "email": "",
+        "password": ""
+      },
+      "superAdmin": {
+        "email": "",
+        "password": ""
+      },
+      "admin": {
+        "email": "admin@college.edu",
+        "password": "TestE2E@2024"
+      }
+    },
+    "resources": {
+      "assignmentIds": [],
+      "batchIds": [
+          "6bbd2b05-6f69-4cb1-951e-f12491e26955"
+        ],
+      "courseIds": [
+          "77ed32c1-ab88-4f44-8d8f-577209e65d9d",
+          "430ad993-f7cd-4211-b148-d133f9ea452a",
+          "36e54852-282d-4708-b439-cb51494e3cca",
+          "e48f4092-bfef-4912-8ca4-3e98d22d618d"
+        ],
+      "facultyMe": null,
+      "studentMe": null,
+      "testIds": [],
+      "userIds": [
+            "6f76e282-0de4-43d0-8b38-f50eb8da0e5e",
+            "b783f826-4a53-4e1e-b26d-301c7c211e59",
+            "41eb712c-4cc9-4735-a4de-030136dc43cf",
+            "120ef4d1-5544-432f-b989-69276efa44ea",
+            "a1c9cbd6-3fee-4974-8679-a6651eef9abd"
+          ],
+      "adminMe": {
+            "avatar_url": null,
+            "email": "admin@college.edu",
+            "id": "ae62d4f0-ab3a-4454-8155-5cde5a0aff88",
+            "institution_id": "27a0e92e-5227-4855-b276-3c1d08ab5dcb",
+            "name": "College Admin",
+            "role": "admin"
+          }
+    },
+    "tokens": {
+      "admin": "eyJhbGciOiJFUzI1NiIsImtpZCI6IjM1YjFkZGRjLWNiMjQtNGY1MS1iZTBlLTMzOThiMWJjZGQwYSIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJodHRwczovL2VkbmJsbHZ1aXdnZGJlam9zb3p1LnN1cGFiYXNlLmNvL2F1dGgvdjEiLCJzdWIiOiJhZTYyZDRmMC1hYjNhLTQ0NTQtODE1NS01Y2RlNWEwYWZmODgiLCJhdWQiOiJhdXRoZW50aWNhdGVkIiwiZXhwIjoxNzg0MDU1NTg0LCJpYXQiOjE3ODQwNTE5ODQsImVtYWlsIjoiYWRtaW5AY29sbGVnZS5lZHUiLCJwaG9uZSI6IiIsImFwcF9tZXRhZGF0YSI6eyJwcm92aWRlciI6ImVtYWlsIiwicHJvdmlkZXJzIjpbImVtYWlsIl19LCJ1c2VyX21ldGFkYXRhIjp7ImVtYWlsX3ZlcmlmaWVkIjp0cnVlLCJuYW1lIjoiQ29sbGVnZSBBZG1pbiIsInJvbGUiOiJhZG1pbiJ9LCJyb2xlIjoiYXV0aGVudGljYXRlZCIsImFhbCI6ImFhbDEiLCJhbXIiOlt7Im1ldGhvZCI6InBhc3N3b3JkIiwidGltZXN0YW1wIjoxNzg0MDUxOTg0fV0sInNlc3Npb25faWQiOiIxM2YzNmQxZi03MzA3LTRmMWYtOWNkYi1jODE1NWM5MTFjOTEiLCJpc19hbm9ueW1vdXMiOmZhbHNlfQ.OwS4n7l-2gqhQsEDmUOKfk4ullITHgvktqs41tfQv_a6AoYTh3LnXH4Zsn2_ebhPs_wIoPERXIuk2DSvA3VsCg"
+    }
+  }
+}

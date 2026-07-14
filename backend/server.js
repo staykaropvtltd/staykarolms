@@ -122,7 +122,18 @@ app.use("/api/upload", uploadLimiter, express.json({ limit: "150mb" }), require(
 app.use(express.json({ limit: "1mb" }));
 
 // ── Health check ────────────────────────────────────────────
+// Cache the probe result for 30 s so rapid polling (Vercel healthchecks,
+// monitoring services) doesn't saturate Supabase with repeated DB calls.
+let _healthCache = null;
+let _healthCacheAt = 0;
+const HEALTH_CACHE_TTL = 30_000;
+
 app.get("/api/health", async (_req, res) => {
+  const now = Date.now();
+  if (_healthCache && now - _healthCacheAt < HEALTH_CACHE_TTL) {
+    return res.json({ ..._healthCache, timestamp: new Date().toISOString(), cached: true });
+  }
+
   const timestamp = new Date().toISOString();
   const services = [];
 
@@ -204,7 +215,10 @@ app.get("/api/health", async (_req, res) => {
   });
 
   const allHealthy = services.every(s => s.status === "Healthy");
-  res.json({ status: allHealthy ? "ok" : "degraded", timestamp, services });
+  const payload = { status: allHealthy ? "ok" : "degraded", timestamp, services };
+  _healthCache   = payload;
+  _healthCacheAt = now;
+  res.json(payload);
 });
 
 // ── Routes ──────────────────────────────────────────────────

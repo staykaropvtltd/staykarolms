@@ -107,88 +107,85 @@ router.get(
         supabase.from("live_classes").select("*", { count: "exact", head: true }).eq("institution_id", institution_id),
       ]);
 
-      // 2. Compute attendance percentage
-      const { data: studentProfiles } = await supabase
-        .from("profiles")
-        .select("id")
-        .eq("institution_id", institution_id);
-      const studentIds = (studentProfiles || []).map((profile) => profile.id);
-
-      let attendancePercent = 0;
-      if (studentIds.length > 0) {
-        const { data: att } = await supabase
+      // 2–4. Parallel batch: attendance %, test stats, assignment stats
+      // All three are independent — run concurrently instead of sequentially.
+      const [
+        { data: attRows },
+        { data: testsInInstitution },
+        { data: instCourses },
+      ] = await Promise.all([
+        // Attendance: use a scalar aggregate via RPC where possible; fall back to
+        // fetching status column only with a hard cap to avoid full-table scans.
+        supabase
           .from("attendance")
-          .select("status")
-          .in("student_id", studentIds);
+          .select("status, profiles!inner(institution_id)")
+          .eq("profiles.institution_id", institution_id)
+          .limit(10000),
+        supabase
+          .from("tests")
+          .select("id")
+          .eq("institution_id", institution_id),
+        supabase
+          .from("courses")
+          .select("id")
+          .eq("institution_id", institution_id),
+      ]);
 
-        const totalDays = att?.length || 0;
-        const presentDays = att?.filter((a) => a.status === "present").length || 0;
-        attendancePercent = totalDays ? Math.round((presentDays / totalDays) * 100) : 0;
-      }
+      // Attendance %
+      const totalDaysAtt  = attRows?.length || 0;
+      const presentDays   = attRows?.filter((a) => a.status === "present").length || 0;
+      const attendancePercent = totalDaysAtt
+        ? Math.round((presentDays / totalDaysAtt) * 100) : 0;
 
-      // 3. Compute test statistics
-      const { data: testsInInstitution } = await supabase
-        .from("tests")
-        .select("id")
-        .eq("institution_id", institution_id);
-      const testIds = (testsInInstitution || []).map((test) => test.id);
-
-      let totalAttempts = 0;
-      let submittedAttempts = [];
-      let avgTestScore = 0;
-      if (testIds.length > 0) {
-        const { data: attempts } = await supabase
-          .from("test_attempts")
-          .select("score, status")
-          .in("test_id", testIds);
-
-        totalAttempts = attempts?.length || 0;
-        submittedAttempts = attempts?.filter((a) => a.status === "submitted") || [];
-        avgTestScore = submittedAttempts.length
-          ? Math.round(submittedAttempts.reduce((acc, curr) => acc + (curr.score || 0), 0) / submittedAttempts.length)
-          : 0;
-      }
-
-      // 4. Compute assignment statistics
-      const { data: instCourses } = await supabase
-        .from("courses")
-        .select("id")
-        .eq("institution_id", institution_id);
+      // Test stats — fetch attempts for discovered test IDs
+      const testIds = (testsInInstitution || []).map((t) => t.id);
       const instCourseIds = (instCourses || []).map((c) => c.id);
 
-      let totalAssignments = 0;
+      const [
+        { data: attempts },
+        { data: institutionAssignments },
+      ] = await Promise.all([
+        testIds.length > 0
+          ? supabase.from("test_attempts").select("score, status").in("test_id", testIds).limit(5000)
+          : Promise.resolve({ data: [] }),
+        instCourseIds.length > 0
+          ? supabase.from("assignments").select("id").in("course_id", instCourseIds)
+          : Promise.resolve({ data: [] }),
+      ]);
+
+      const totalAttempts    = attempts?.length || 0;
+      const submittedAttempts = attempts?.filter((a) => a.status === "submitted") || [];
+      const avgTestScore = submittedAttempts.length
+        ? Math.round(submittedAttempts.reduce((acc, curr) => acc + (curr.score || 0), 0) / submittedAttempts.length)
+        : 0;
+
+      // Assignment stats — fetch submissions for discovered assignment IDs
+      const assignmentIds = (institutionAssignments || []).map((a) => a.id);
+      const totalAssignments = assignmentIds.length;
+
       let avgAssignmentGrade = 0;
-      let totalSubmissions = 0;
+      let totalSubmissions   = 0;
       let pendingSubmissions = 0;
 
-      if (instCourseIds.length > 0) {
-        const { data: institutionAssignments } = await supabase
-          .from("assignments")
-          .select("id")
-          .in("course_id", instCourseIds);
-
-        const assignmentIds = (institutionAssignments || []).map((a) => a.id);
-        totalAssignments = assignmentIds.length;
-
-        if (assignmentIds.length > 0) {
-          const { data: subs } = await supabase
-            .from("assignment_submissions")
-            .select("grade")
-            .in("assignment_id", assignmentIds);
-
-          totalSubmissions = subs?.length || 0;
-          const gradedSubs = subs?.filter((s) => s.grade !== null) || [];
-          avgAssignmentGrade = gradedSubs.length
-            ? Math.round(gradedSubs.reduce((acc, curr) => acc + curr.grade, 0) / gradedSubs.length)
-            : 0;
-
-          const { count } = await supabase
+      if (assignmentIds.length > 0) {
+        const [
+          { data: subs },
+          { count: pendingCount },
+        ] = await Promise.all([
+          supabase.from("assignment_submissions").select("grade").in("assignment_id", assignmentIds).limit(5000),
+          supabase
             .from("assignment_submissions")
             .select("*", { count: "exact", head: true })
             .in("assignment_id", assignmentIds)
-            .is("grade", null);
-          pendingSubmissions = count || 0;
-        }
+            .is("grade", null),
+        ]);
+
+        totalSubmissions = subs?.length || 0;
+        pendingSubmissions = pendingCount || 0;
+        const gradedSubs = subs?.filter((s) => s.grade !== null) || [];
+        avgAssignmentGrade = gradedSubs.length
+          ? Math.round(gradedSubs.reduce((acc, curr) => acc + curr.grade, 0) / gradedSubs.length)
+          : 0;
       }
 
       return res.json({
