@@ -22,10 +22,9 @@
     "helmet": "^8.2.0",
     "ioredis": "^5.11.1",
     "jsonwebtoken": "^9.0.3",
-    "pm2": "^6.0.14",
     "rate-limit-redis": "^5.0.0"
   },
   "devDependencies": {
-    "playwright": "^1.60.0"
+    "pm2": "^7.0.3"
   }
 }

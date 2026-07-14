@@ -14,18 +14,30 @@ backend/.env.*
 # Build output
 backend/node_modules
 
-# Claude Code local config
+# Claude Code local config and runtime locks
 .claude/settings.local.json
+.claude/scheduled_tasks.lock
 
-# Audit docs (internal only)
+# Internal ops docs — use the issue tracker instead
+PENDING_ACTIONS.md
 *.docx
 
-# PM2 logs
+# PM2 logs and pids
 backend/logs/
+backend/pids/
+*.pid
 
-# k6 load test reports — raw JSON files can be 250 MB+, never commit them
+# k6 load test reports — raw JSON/HTML/txt can be 250 MB+, never commit them
 performance/reports/*.json
 performance/reports/*.html
 performance/reports/*.txt
-# keep the placeholder
+# keep the placeholder so the directory is preserved in git
 !performance/reports/.gitkeep
+
+# Playwright test results
+playwright-report/
+test-results/
+
+# OS artifacts
+.DS_Store
+Thumbs.db
