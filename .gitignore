@@ -22,3 +22,10 @@ backend/node_modules
 
 # PM2 logs
 backend/logs/
+
+# k6 load test reports — raw JSON files can be 250 MB+, never commit them
+performance/reports/*.json
+performance/reports/*.html
+performance/reports/*.txt
+# keep the placeholder
+!performance/reports/.gitkeep

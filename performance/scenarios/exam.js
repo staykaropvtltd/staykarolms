@@ -165,24 +165,28 @@ export function handleSummary(data) {
   const dir  = (__ENV.REPORT_DIR || 'performance/reports').replace(/\/$/, '');
   const m    = data.metrics;
 
-  const failRate  = m.http_req_failed     ? (m.http_req_failed.values.rate * 100).toFixed(2) : 'N/A';
-  const p95       = m.http_req_duration   ? m.http_req_duration.values['p(95)'].toFixed(0)   : 'N/A';
-  const p99       = m.http_req_duration   ? m.http_req_duration.values['p(99)'].toFixed(0)   : 'N/A';
-  const avg       = m.http_req_duration   ? m.http_req_duration.values.avg.toFixed(0)        : 'N/A';
-  const rps       = m.http_reqs          ? m.http_reqs.values.rate.toFixed(2)                : 'N/A';
-  const total     = m.http_reqs          ? m.http_reqs.values.count                          : 0;
-  const starts    = m.exam_starts_ok     ? m.exam_starts_ok.values.count                     : 0;
-  const sFail     = m.exam_starts_fail   ? m.exam_starts_fail.values.count                   : 0;
-  const answers   = m.exam_answers_saved ? m.exam_answers_saved.values.count                 : 0;
-  const submits   = m.exam_submits_ok    ? m.exam_submits_ok.values.count                    : 0;
-  const subFail   = m.exam_submits_fail  ? m.exam_submits_fail.values.count                  : 0;
-  const e2eP95    = m.exam_e2e_ms       ? m.exam_e2e_ms.values['p(95)'].toFixed(0)           : 'N/A';
-  const e2eAvg    = m.exam_e2e_ms       ? m.exam_e2e_ms.values.avg.toFixed(0)                : 'N/A';
+  // Safe accessor — returns 'N/A' instead of throwing when a metric has no data
+  const val   = (metric, key)    => metric?.values?.[key]  != null ? Number(metric.values[key]).toFixed(key === 'rate' ? 2 : 0) : 'N/A';
+  const count = (metric)         => metric?.values?.count  ?? 0;
 
-  const testsP95  = m['http_req_duration{endpoint:tests}']    ? m['http_req_duration{endpoint:tests}'].values['p(95)'].toFixed(0)    : 'N/A';
-  const attP95    = m['http_req_duration{endpoint:attempts}'] ? m['http_req_duration{endpoint:attempts}'].values['p(95)'].toFixed(0) : 'N/A';
-  const dashP95   = m['http_req_duration{endpoint:analytics}']? m['http_req_duration{endpoint:analytics}'].values['p(95)'].toFixed(0): 'N/A';
-  const notifP95  = m['http_req_duration{endpoint:notifications}'] ? m['http_req_duration{endpoint:notifications}'].values['p(95)'].toFixed(0) : 'N/A';
+  const failRate  = val(m.http_req_failed,     'rate') !== 'N/A' ? (m.http_req_failed.values.rate * 100).toFixed(2) : 'N/A';
+  const p95       = val(m.http_req_duration,   'p(95)');
+  const p99       = val(m.http_req_duration,   'p(99)');
+  const avg       = val(m.http_req_duration,   'avg');
+  const rps       = m.http_reqs?.values?.rate  != null ? Number(m.http_reqs.values.rate).toFixed(2) : 'N/A';
+  const total     = count(m.http_reqs);
+  const starts    = count(m.exam_starts_ok);
+  const sFail     = count(m.exam_starts_fail);
+  const answers   = count(m.exam_answers_saved);
+  const submits   = count(m.exam_submits_ok);
+  const subFail   = count(m.exam_submits_fail);
+  const e2eP95    = val(m.exam_e2e_ms, 'p(95)');
+  const e2eAvg    = val(m.exam_e2e_ms, 'avg');
+
+  const testsP95  = val(m['http_req_duration{endpoint:tests}'],         'p(95)');
+  const attP95    = val(m['http_req_duration{endpoint:attempts}'],       'p(95)');
+  const dashP95   = val(m['http_req_duration{endpoint:analytics}'],      'p(95)');
+  const notifP95  = val(m['http_req_duration{endpoint:notifications}'],  'p(95)');
 
   const passColor   = (v, threshold) => parseInt(v) <= threshold ? '#22c55e' : '#ef4444';
   const statusBadge = (v, threshold) => parseInt(v) <= threshold

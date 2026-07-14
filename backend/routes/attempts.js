@@ -128,29 +128,34 @@ router.post("/:id/submit", authenticate, requireRole("student"), async (req, res
     if (answersError) return res.status(400).json({ error: answersError.message });
 
     let totalScore = 0;
-    const updates = [];
 
-    for (const ans of answers) {
+    // Grade all answers in-memory, then bulk-upsert in a single HTTP call to Supabase.
+    // Replaces N individual UPDATE calls (one per answer) with a single request.
+    const gradedRows = answers.map((ans) => {
       const question = ans.test_questions;
       let isCorrect = false;
       let marksAwarded = 0;
-
-      if (question.type === "mcq" && question.correct_answer) {
+      if (question?.type === "mcq" && question.correct_answer) {
         isCorrect = ans.answer?.trim() === question.correct_answer?.trim();
-        marksAwarded = isCorrect ? question.marks : 0;
+        marksAwarded = isCorrect ? (question.marks || 1) : 0;
       }
-
       totalScore += marksAwarded;
-      updates.push(
-        supabase
-          .from("test_answers")
-          .update({ is_correct: isCorrect, marks_awarded: marksAwarded })
-          .eq("id", ans.id)
-      );
-    }
+      return {
+        id: ans.id,
+        attempt_id: attemptId,
+        question_id: ans.question_id,
+        answer: ans.answer,
+        is_correct: isCorrect,
+        marks_awarded: marksAwarded,
+      };
+    });
 
-    // Execute all answer updates
-    await Promise.all(updates);
+    if (gradedRows.length > 0) {
+      const { error: gradeErr } = await supabase
+        .from("test_answers")
+        .upsert(gradedRows, { onConflict: "id" });
+      if (gradeErr) console.error("[attempts/submit] bulk grade error:", gradeErr.message);
+    }
 
     // Finalize attempt
     const { data, error } = await supabase

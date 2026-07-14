@@ -85,7 +85,8 @@ const generalLimiter = makeLimiter({
 
 const authLimiter = makeLimiter({
   windowMs: 15 * 60 * 1000,
-  max: 15,    // 15 login attempts per 15 min per IP
+  // Default 100/15min covers a full campus on one NAT IP. Override with AUTH_RATE_LIMIT_MAX.
+  max: parseInt(process.env.AUTH_RATE_LIMIT_MAX || "100", 10),
   message: "Too many login attempts, please try again later.",
 });
 

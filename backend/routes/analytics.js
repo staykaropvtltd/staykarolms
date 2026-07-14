@@ -1,12 +1,20 @@
 const router = require("express").Router();
 const supabase = require("../lib/supabase");
+const redis = require("../lib/redis");
 const authenticate = require("../middleware/auth");
 const { requireRole } = require("../middleware/roleGuard");
 
 // GET /api/analytics/student — student's own progress
+// Cached per-student in Redis for 30 s — eliminates 5 parallel DB queries on every dashboard load.
 router.get("/student", authenticate, requireRole("student"), async (req, res, next) => {
   try {
-    const studentId = req.user.id;
+    const studentId  = req.user.id;
+    const cacheKey   = `analytics:student:${studentId}`;
+    const cached     = await redis.get(cacheKey);
+    if (cached) {
+      try { return res.json({ data: JSON.parse(cached) }); }
+      catch { /* corrupt — fall through */ }
+    }
 
     const [
       { data: enrollments },
@@ -29,17 +37,18 @@ router.get("/student", authenticate, requireRole("student"), async (req, res, ne
       : 0;
     const completedTests = (attempts || []).filter((a) => a.status === "submitted").length;
 
-    return res.json({
-      data: {
-        enrolledCourses: enrollments?.length || 0,
-        attendancePercent: totalDays ? Math.round((presentDays / totalDays) * 100) : 0,
-        avgAssignmentGrade: avgGrade,
-        completedTests,
-        aiSessionCount: aiSessions?.length || 0,
-        recentAttempts: attempts?.slice(0, 5) || [],
-        enrollments: enrollments || [],
-      },
-    });
+    const data = {
+      enrolledCourses: enrollments?.length || 0,
+      attendancePercent: totalDays ? Math.round((presentDays / totalDays) * 100) : 0,
+      avgAssignmentGrade: avgGrade,
+      completedTests,
+      aiSessionCount: aiSessions?.length || 0,
+      recentAttempts: attempts?.slice(0, 5) || [],
+      enrollments: enrollments || [],
+    };
+
+    await redis.set(cacheKey, JSON.stringify(data), 30);
+    return res.json({ data });
   } catch (err) {
     return next(err);
   }
