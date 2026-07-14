@@ -14,6 +14,9 @@ backend/.env.*
 # Build output
 backend/node_modules
 
+# Root npm lockfile — this project uses pnpm (pnpm-lock.yaml is authoritative)
+package-lock.json
+
 # Claude Code local config and runtime locks
 .claude/settings.local.json
 .claude/scheduled_tasks.lock
