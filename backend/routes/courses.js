@@ -14,22 +14,41 @@ router.get("/", authenticate, async (req, res, next) => {
     `);
 
     if (req.user.role === "student") {
-      const { data: enrollments } = await supabase
-        .from("enrollments")
-        .select("course_id")
-        .eq("student_id", req.user.id);
-      const enrolledIds = (enrollments || []).map((e) => e.course_id).filter(Boolean);
-
       if (req.query.available === "true") {
-        // Return institution courses NOT yet enrolled in
+        // Non-enrolled courses: fetch enrolled IDs then exclude them.
+        // Two queries but both are index-hit selects — faster than a NOT EXISTS subquery via PostgREST.
+        const { data: enrollments } = await supabase
+          .from("enrollments")
+          .select("course_id")
+          .eq("student_id", req.user.id);
+        const enrolledIds = (enrollments || []).map((e) => e.course_id).filter(Boolean);
+
         query = query.eq("institution_id", req.user.institution_id);
         if (enrolledIds.length > 0) {
           query = query.not("id", "in", `(${enrolledIds.join(",")})`);
         }
+
+        const { data, error } = await query.order("created_at", { ascending: false });
+        if (error) return res.status(400).json({ error: error.message });
+        return res.json({ data });
       } else {
-        // Default: return only enrolled courses
-        if (enrolledIds.length === 0) return res.json({ data: [] });
-        query = query.in("id", enrolledIds);
+        // Enrolled courses: single JOIN query (enrollments → courses) — no separate round-trip.
+        const { data: rows, error } = await supabase
+          .from("enrollments")
+          .select(`
+            enrolled_at,
+            courses:course_id (
+              *,
+              profiles:faculty_id ( name, email ),
+              enrollments ( count )
+            )
+          `)
+          .eq("student_id", req.user.id)
+          .order("enrolled_at", { ascending: false });
+
+        if (error) return res.status(400).json({ error: error.message });
+        const data = (rows || []).map((r) => r.courses).filter(Boolean);
+        return res.json({ data });
       }
     } else if (req.user.role !== "super-admin") {
       query = query.eq("institution_id", req.user.institution_id);

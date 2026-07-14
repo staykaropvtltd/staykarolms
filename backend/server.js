@@ -5,27 +5,14 @@ const helmet = require("helmet");
 const compression = require("compression");
 const rateLimit = require("express-rate-limit");
 const { RedisStore } = require("rate-limit-redis");
-const Redis = require("ioredis");
 const supabase = require("./lib/supabase");
+const redis = require("./lib/redis");
 
 const app = express();
 
-// ── Redis client (optional) ──────────────────────────────────
-// Set REDIS_URL in .env to enable cluster-safe shared rate limiting.
-// Without it, each PM2 worker enforces limits independently (acceptable
-// for <500 users; at 500+ with 4 workers the effective limit is 4×).
-let redisClient = null;
-if (process.env.REDIS_URL) {
-  redisClient = new Redis(process.env.REDIS_URL, {
-    maxRetriesPerRequest: 1,
-    enableReadyCheck: false,
-    lazyConnect: true,
-  });
-  redisClient.on("error", (err) => {
-    console.warn("[Redis] Connection error — falling back to memory store:", err.message);
-    redisClient = null;
-  });
-}
+// Shared Redis client — lib/redis.js handles lazy-init and error recovery.
+// Falls back gracefully to null when REDIS_URL is not set.
+const redisClient = redis.getClient();
 
 // Build rate-limiter options, shared via Redis when available
 function makeLimiter({ windowMs, max, message }) {
@@ -36,9 +23,10 @@ function makeLimiter({ windowMs, max, message }) {
     legacyHeaders: false,
     message: { error: message },
   };
-  if (redisClient) {
+  const rc = redis.getClient();
+  if (rc) {
     opts.store = new RedisStore({
-      sendCommand: (...args) => redisClient.call(...args),
+      sendCommand: (...args) => rc.call(...args),
     });
   }
   return rateLimit(opts);
@@ -130,6 +118,16 @@ const HEALTH_CACHE_TTL = 30_000;
 
 app.get("/api/health", async (_req, res) => {
   const now = Date.now();
+
+  // Check Redis first (shared across all Vercel invocations)
+  const redisCached = await redis.get("health:cache");
+  if (redisCached) {
+    try {
+      const payload = JSON.parse(redisCached);
+      return res.json({ ...payload, timestamp: new Date().toISOString(), cached: true });
+    } catch { /* fall through */ }
+  }
+
   if (_healthCache && now - _healthCacheAt < HEALTH_CACHE_TTL) {
     return res.json({ ..._healthCache, timestamp: new Date().toISOString(), cached: true });
   }
@@ -218,6 +216,8 @@ app.get("/api/health", async (_req, res) => {
   const payload = { status: allHealthy ? "ok" : "degraded", timestamp, services };
   _healthCache   = payload;
   _healthCacheAt = now;
+  // Also cache in Redis so all serverless instances benefit
+  await redis.set("health:cache", JSON.stringify(payload), HEALTH_CACHE_TTL / 1000);
   res.json(payload);
 });
 

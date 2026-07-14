@@ -10,11 +10,19 @@ router.post("/start", authenticate, requireRole("student"), async (req, res, nex
   if (!test_id) return res.status(400).json({ error: "test_id is required" });
 
   try {
-    const { data: test, error: testError } = await supabase
-      .from("tests")
-      .select("id, institution_id, status")
-      .eq("id", test_id)
-      .single();
+    // Fetch test metadata and any existing in-progress attempt in parallel
+    const [
+      { data: test, error: testError },
+      { data: existing },
+    ] = await Promise.all([
+      supabase.from("tests").select("id, institution_id, status").eq("id", test_id).single(),
+      supabase.from("test_attempts")
+        .select("id, status")
+        .eq("test_id", test_id)
+        .eq("student_id", req.user.id)
+        .eq("status", "in_progress")
+        .maybeSingle(),
+    ]);
 
     if (testError || !test) return res.status(404).json({ error: "Test not found" });
 
@@ -25,15 +33,6 @@ router.post("/start", authenticate, requireRole("student"), async (req, res, nex
     if (test.status !== "published") {
       return res.status(403).json({ error: "Test is not available for attempts" });
     }
-
-    // Check if already in progress
-    const { data: existing } = await supabase
-      .from("test_attempts")
-      .select("id, status")
-      .eq("test_id", test_id)
-      .eq("student_id", req.user.id)
-      .eq("status", "in_progress")
-      .maybeSingle();
 
     if (existing) {
       return res.json({ data: existing });
@@ -95,6 +94,8 @@ router.post("/:id/submit", authenticate, requireRole("student"), async (req, res
   const attemptId = req.params.id;
 
   try {
+    // Fetch attempt — we need test_id before we can fetch the test,
+    // so this is necessarily a sequential step.
     const { data: attempt, error: attemptError } = await supabase
       .from("test_attempts")
       .select("id, student_id, status, started_at, test_id")
@@ -110,13 +111,12 @@ router.post("/:id/submit", authenticate, requireRole("student"), async (req, res
       return res.status(400).json({ error: "Attempt is not in progress" });
     }
 
-    // Server-side time enforcement — reject if student held the attempt open past the deadline.
-    // 2-minute grace period absorbs clock skew and slow final submissions.
-    const { data: test } = await supabase
-      .from("tests")
-      .select("duration_mins")
-      .eq("id", attempt.test_id)
-      .single();
+    // Fetch test metadata and answers in parallel — both are independent once we have test_id.
+    // Server-side time enforcement: 2-minute grace period absorbs clock skew.
+    const [{ data: test }, { data: answers, error: answersError }] = await Promise.all([
+      supabase.from("tests").select("duration_mins").eq("id", attempt.test_id).single(),
+      supabase.from("test_answers").select("*, test_questions(*)").eq("attempt_id", attemptId),
+    ]);
 
     if (test?.duration_mins) {
       const elapsedMins = (Date.now() - new Date(attempt.started_at).getTime()) / 60000;
@@ -124,12 +124,6 @@ router.post("/:id/submit", authenticate, requireRole("student"), async (req, res
         return res.status(403).json({ error: "Test time has expired" });
       }
     }
-
-    // Get all answers + questions for this attempt
-    const { data: answers, error: answersError } = await supabase
-      .from("test_answers")
-      .select("*, test_questions(*)")
-      .eq("attempt_id", attemptId);
 
     if (answersError) return res.status(400).json({ error: answersError.message });
 
