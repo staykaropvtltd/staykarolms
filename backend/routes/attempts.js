@@ -47,11 +47,7 @@ router.post("/start", authenticate, requireRole("student"), async (req, res, nex
     if (error) return res.status(400).json({ error: error.message });
     return res.status(201).json({ data });
   } catch (err) {
-    // TEMP DIAG — revert after reading error
-    return res.status(500).json({
-      error: "Internal server error",
-      _d: { msg: err?.message, type: err?.constructor?.name, code: err?.code },
-    });
+    return next(err);
   }
 });
 
