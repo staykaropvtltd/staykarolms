@@ -15,13 +15,22 @@ function getClient() {
   if (_failed) return null;
   if (_client) return _client;
 
-  _client = new Redis(process.env.REDIS_URL, {
-    maxRetriesPerRequest:  1,
-    enableReadyCheck:      false,
-    lazyConnect:           true,
-    connectTimeout:        2000,  // 2 s — don't stall request pipeline
-    commandTimeout:        500,   // 500 ms per command
-  });
+  // A malformed REDIS_URL (or any other construction-time error) must never
+  // crash the caller — Redis is always an optional accelerator, never a
+  // dependency the request pipeline can fail on.
+  try {
+    _client = new Redis(process.env.REDIS_URL, {
+      maxRetriesPerRequest:  1,
+      enableReadyCheck:      false,
+      lazyConnect:           true,
+      connectTimeout:        2000,  // 2 s — don't stall request pipeline
+      commandTimeout:        500,   // 500 ms per command
+    });
+  } catch (err) {
+    _failed = true;
+    console.error("[Redis] failed to construct client — Redis disabled:", err.message);
+    return null;
+  }
 
   _client.on("error", (err) => {
     _errorCount++;

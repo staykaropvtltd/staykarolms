@@ -2,11 +2,18 @@
 // Unit tests for backend/middleware/auth.js
 // No real Supabase or Redis connections — all external calls are mocked.
 
-const jwt = require('jsonwebtoken');
+const jwt    = require('jsonwebtoken');
+const crypto = require('crypto');
 
 // ── Mocks ─────────────────────────────────────────────────────
 const mockRedis = require('./helpers/mockRedis');
 jest.mock('../lib/redis', () => mockRedis);
+
+// Mirrors tokenCacheKey() in middleware/auth.js — the middleware caches by
+// SHA-256(token), not by user id, so a Redis hit can skip JWT verification too.
+function tokenCacheKey(token) {
+  return 'auth:' + crypto.createHash('sha256').update(token).digest('hex').slice(0, 40);
+}
 
 const { createMockSupabase, ok, err } = require('./helpers/mockSupabase');
 
@@ -123,10 +130,11 @@ describe('auth middleware', () => {
     const mockSupa = createMockSupabase(); // no profiles entry — DB would return null
     const authenticate = buildAuthMiddleware(mockSupa);
 
-    // Pre-populate Redis cache
-    mockRedis.cacheHit(`profile:u-student`, STUDENT_PROFILE);
-
     const token = makeToken('u-student');
+
+    // Pre-populate Redis cache under the key the middleware will look up
+    mockRedis.cacheHit(tokenCacheKey(token), STUDENT_PROFILE);
+
     const req   = mockReq(token);
     const res   = mockRes();
     const next  = jest.fn();

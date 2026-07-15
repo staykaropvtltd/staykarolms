@@ -30,6 +30,9 @@ function makeLimiter({ windowMs, max, message }) {
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: message },
+    // If Redis is down/unreachable, fail open (allow the request) instead of
+    // taking down every route — each worker just enforces limits independently.
+    passOnStoreError: true,
   };
   const rc = redis.getClient();
   if (rc) {
