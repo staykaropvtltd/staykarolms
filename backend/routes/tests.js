@@ -28,6 +28,16 @@ router.get("/", authenticate, async (req, res, next) => {
 
     const { data, error } = await query.order("created_at", { ascending: false });
     if (error) return res.status(400).json({ error: error.message });
+    // TEMP DIAG: log when empty to debug 0-test issue
+    if (!data || data.length === 0) {
+      console.warn("[tests/GET] returned 0 results — user:", JSON.stringify(req.user));
+      // Run a simple count without joins to confirm data exists
+      const { count } = await supabase.from("tests")
+        .select("id", { count: "exact", head: true })
+        .eq("institution_id", req.user.institution_id)
+        .eq("status", "published");
+      console.warn("[tests/GET] simple count:", count, "inst:", req.user.institution_id);
+    }
     return res.json({ data });
   } catch (err) {
     return next(err);
