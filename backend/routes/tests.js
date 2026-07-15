@@ -208,6 +208,71 @@ router.post(
   }
 );
 
+// PUT /api/tests/:id/questions/:qid — update an existing question
+router.put(
+  "/:id/questions/:qid",
+  authenticate,
+  requireRole("admin", "faculty", "super-admin"),
+  async (req, res, next) => {
+    try {
+      let testQuery = supabase.from("tests").select("id").eq("id", req.params.id);
+      if (req.user.role !== "super-admin") {
+        testQuery = testQuery.eq("institution_id", req.user.institution_id);
+      }
+      const { data: test, error: testError } = await testQuery.single();
+      if (testError || !test) return res.status(404).json({ error: "Test not found" });
+
+      const allowed = ["question", "type", "options", "correct_answer", "marks", "order_index"];
+      const updateFields = allowed.reduce((acc, key) => {
+        if (req.body[key] !== undefined) acc[key] = req.body[key];
+        return acc;
+      }, {});
+
+      const { data, error } = await supabase
+        .from("test_questions")
+        .update(updateFields)
+        .eq("id", req.params.qid)
+        .eq("test_id", req.params.id)
+        .select()
+        .single();
+
+      if (error) return res.status(400).json({ error: error.message });
+      if (!data) return res.status(404).json({ error: "Question not found" });
+      return res.json({ data });
+    } catch (err) {
+      return next(err);
+    }
+  }
+);
+
+// DELETE /api/tests/:id/questions/:qid — delete a question
+router.delete(
+  "/:id/questions/:qid",
+  authenticate,
+  requireRole("admin", "faculty", "super-admin"),
+  async (req, res, next) => {
+    try {
+      let testQuery = supabase.from("tests").select("id").eq("id", req.params.id);
+      if (req.user.role !== "super-admin") {
+        testQuery = testQuery.eq("institution_id", req.user.institution_id);
+      }
+      const { data: test, error: testError } = await testQuery.single();
+      if (testError || !test) return res.status(404).json({ error: "Test not found" });
+
+      const { error } = await supabase
+        .from("test_questions")
+        .delete()
+        .eq("id", req.params.qid)
+        .eq("test_id", req.params.id);
+
+      if (error) return res.status(400).json({ error: error.message });
+      return res.json({ data: { message: "Question deleted" } });
+    } catch (err) {
+      return next(err);
+    }
+  }
+);
+
 // PUT /api/tests/:id — update test (for scheduling changes)
 router.put(
   "/:id",

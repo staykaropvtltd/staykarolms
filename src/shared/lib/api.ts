@@ -302,6 +302,26 @@ export const deleteTest = (testId: string) =>
 export const getTestAttempts = (testId: string) =>
   apiFetch(`/api/tests/${testId}/attempts`);
 
+export const updateTestQuestion = (
+  testId: string,
+  qId: string,
+  payload: {
+    question?: string;
+    type?: "mcq" | "coding" | "short";
+    options?: string[] | null;
+    correct_answer?: string | null;
+    marks?: number;
+    order_index?: number;
+  }
+) =>
+  apiFetch(`/api/tests/${testId}/questions/${qId}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+
+export const deleteTestQuestion = (testId: string, qId: string) =>
+  apiFetch(`/api/tests/${testId}/questions/${qId}`, { method: "DELETE" });
+
 // ── Attempts ─────────────────────────────────────────────────────────────────
 
 export const startAttempt = (testId: string) =>

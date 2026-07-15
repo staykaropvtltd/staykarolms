@@ -183,7 +183,7 @@ router.get("/:id/result", authenticate, async (req, res, next) => {
       .from("test_attempts")
       .select(`
         *,
-        tests:test_id ( title, type, duration_mins ),
+        tests:test_id ( title, type, duration_mins, institution_id ),
         test_answers (
           *,
           test_questions ( question, type, correct_answer, marks, options )
@@ -194,12 +194,16 @@ router.get("/:id/result", authenticate, async (req, res, next) => {
 
     if (attemptError) return res.status(404).json({ error: "Attempt not found" });
 
-    // Security: only the student or admin/faculty can see results
-    if (
-      req.user.role === "student" &&
-      attempt.student_id !== req.user.id
-    ) {
+    // Students can only see their own result
+    if (req.user.role === "student" && attempt.student_id !== req.user.id) {
       return res.status(403).json({ error: "Forbidden" });
+    }
+
+    // Admin/faculty are scoped to their institution
+    if (req.user.role !== "student" && req.user.role !== "super-admin") {
+      if (attempt.tests?.institution_id !== req.user.institution_id) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
     }
 
     return res.json({ data: attempt });
