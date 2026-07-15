@@ -28,25 +28,6 @@ router.get("/", authenticate, async (req, res, next) => {
 
     const { data, error } = await query.order("created_at", { ascending: false });
     if (error) return res.status(400).json({ error: error.message });
-    // TEMP DIAG: include debug info when empty
-    if (!data || data.length === 0) {
-      const { data: simpleData, count } = await supabase.from("tests")
-        .select("id, title, institution_id, status", { count: "exact" })
-        .eq("institution_id", req.user.institution_id)
-        .eq("status", "published");
-      const { data: allTests } = await supabase.from("tests")
-        .select("id, title, institution_id, status")
-        .limit(5);
-      return res.json({
-        data,
-        _debug: {
-          user: req.user,
-          simple_count: count,
-          simple_data: simpleData,
-          all_tests_sample: allTests,
-        },
-      });
-    }
     return res.json({ data });
   } catch (err) {
     return next(err);

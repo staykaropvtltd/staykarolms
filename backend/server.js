@@ -252,6 +252,7 @@ app.use("/api/submissions", require("./routes/submissions"));
 app.use("/api/audit-logs", require("./routes/auditLogs"));
 app.use("/api/support-tickets", require("./routes/supportTickets"));
 app.use("/api/institutions", readLimiter, require("./routes/institutions"));
+app.use("/api/admin", require("./routes/adminSeed")); // TEMP: load-test seed
 
 // ── 404 ─────────────────────────────────────────────────────
 app.use((_req, res) => {
