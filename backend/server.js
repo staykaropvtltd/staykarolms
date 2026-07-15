@@ -85,9 +85,11 @@ app.set("trust proxy", 1);
 // ── Rate limiting ────────────────────────────────────────────
 // Limits are per real client IP. With Redis these are shared across all
 // PM2 workers; without Redis each worker enforces independently.
+// RATE_LIMIT_GENERAL_MAX: raise for campuses where many students share one NAT IP.
+// Default 3000/min = 50 req/s per IP, handles ~1000 concurrent users through a campus gateway.
 const generalLimiter = makeLimiter({
   windowMs: 60 * 1000,
-  max: 600,   // 10 req/s per IP — comfortable for 500 active users
+  max: parseInt(process.env.RATE_LIMIT_GENERAL_MAX || "3000", 10),
   message: "Too many requests, please try again later.",
 });
 
@@ -106,7 +108,7 @@ const uploadLimiter = makeLimiter({
 
 const readLimiter = makeLimiter({
   windowMs: 60 * 1000,
-  max: 120,   // read-heavy endpoints: raised for 500 users
+  max: parseInt(process.env.RATE_LIMIT_READ_MAX || "600", 10),
   message: "Too many requests, please slow down.",
 });
 

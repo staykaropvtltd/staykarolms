@@ -51,7 +51,53 @@ router.post("/start", authenticate, requireRole("student"), async (req, res, nex
   }
 });
 
-// POST /api/attempts/:id/answer — save one answer
+// POST /api/attempts/:id/answers — batch-save all answers (idempotent, preferred)
+// Accepts { answers: [{ question_id, answer }, ...] } and upserts them all in one
+// DB round-trip. Reduces answer-phase DB operations from N×2 to 1×2.
+router.post("/:id/answers", authenticate, requireRole("student"), async (req, res, next) => {
+  const { answers } = req.body;
+
+  if (!Array.isArray(answers) || answers.length === 0) {
+    return res.status(400).json({ error: "answers array is required and must not be empty" });
+  }
+  if (answers.some(a => !a.question_id)) {
+    return res.status(400).json({ error: "Each answer must include question_id" });
+  }
+
+  try {
+    const { data: attempt, error: attemptError } = await supabase
+      .from("test_attempts")
+      .select("id, student_id, status")
+      .eq("id", req.params.id)
+      .eq("student_id", req.user.id)
+      .single();
+
+    if (attemptError || !attempt) {
+      return res.status(404).json({ error: "Attempt not found" });
+    }
+    if (attempt.status !== "in_progress") {
+      return res.status(400).json({ error: "Attempt is not in progress" });
+    }
+
+    const rows = answers.map(({ question_id, answer }) => ({
+      attempt_id: req.params.id,
+      question_id,
+      answer: answer ?? null,
+    }));
+
+    const { data, error } = await supabase
+      .from("test_answers")
+      .upsert(rows, { onConflict: "attempt_id,question_id" })
+      .select();
+
+    if (error) return res.status(400).json({ error: error.message });
+    return res.json({ data });
+  } catch (err) {
+    return next(err);
+  }
+});
+
+// POST /api/attempts/:id/answer — save one answer (kept for API compatibility)
 router.post("/:id/answer", authenticate, requireRole("student"), async (req, res, next) => {
   const { question_id, answer } = req.body;
 
