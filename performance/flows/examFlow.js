@@ -126,7 +126,10 @@ export function examFlow(ctx) {
     // Realistic exam think time: 8–30 s per question
     sleep(jitter(8, 30));
 
-    const opts = q.options;
+    let opts = q.options;
+    if (typeof opts === 'string') {
+      try { opts = JSON.parse(opts); } catch { opts = []; }
+    }
     let answer;
     if (q.type === 'mcq' && Array.isArray(opts) && opts.length > 0) {
       answer = opts[Math.floor(Math.random() * opts.length)];
