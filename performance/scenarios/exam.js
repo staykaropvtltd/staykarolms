@@ -127,8 +127,10 @@ export function setup() {
       console.log(`[setup] Published tests found: ${tests.length}`);
 
       if (tests.length > 0) {
-        testId = tests[0].id;
-        const title = tests[0].title || '(untitled)';
+        // Prefer the seeded load-test exam (has 5 MCQ questions); fall back to first
+        const preferred = tests.find(t => t.title === 'Load Test Exam — MCQ Practice') || tests[0];
+        testId = preferred.id;
+        const title = preferred.title || '(untitled)';
         console.log(`[setup] Using test: "${title}" (${testId})`);
 
         // Fetch full test with questions
