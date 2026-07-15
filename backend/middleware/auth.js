@@ -18,7 +18,13 @@ const redis    = require("../lib/redis");
 
 const _localCache  = new Map(); // cacheKey → { profile, expiresAt }
 const LOCAL_TTL_MS = 60_000;    // 60 s — within a warm lambda invocation
-const REDIS_TTL_S  = 300;       // 5 min — max Redis TTL (bounded by token expiry below)
+
+// Max Redis TTL for a cached auth result, bounded by the token's real expiry.
+// SECURITY: if a user's role or institution_id changes in the DB, the cached
+// value will be stale for up to this many seconds. For exam sessions this is
+// acceptable — role changes are rare admin operations, and the window is the
+// same as the old per-profile Redis TTL. Override with AUTH_CACHE_TTL_S.
+const REDIS_TTL_S  = parseInt(process.env.AUTH_CACHE_TTL_S || "60", 10);
 
 // Derive a short, stable key from the token without logging the secret material.
 function tokenCacheKey(token) {
@@ -27,9 +33,12 @@ function tokenCacheKey(token) {
 
 // Extract the JWT exp claim without verifying the signature.
 // Used only to bound the Redis TTL so we never cache past real expiry.
+// Uses standard base64 after converting URL-safe chars — avoids the "base64url"
+// encoding alias which is only available in Node >= 18.
 function unsafeExp(token) {
   try {
-    const payload = JSON.parse(Buffer.from(token.split(".")[1], "base64url").toString());
+    const b64 = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+    const payload = JSON.parse(Buffer.from(b64, "base64").toString("utf8"));
     return typeof payload.exp === "number" ? payload.exp : null;
   } catch { return null; }
 }
@@ -121,7 +130,7 @@ async function authenticate(req, res, next) {
     }
 
     req.user = profile;
-    next();
+    return next();
   } catch (err) {
     console.error("[auth] middleware error:", err.message);
     return res.status(500).json({ error: "Authentication failed" });
