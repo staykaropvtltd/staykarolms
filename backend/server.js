@@ -7,8 +7,16 @@ const rateLimit = require("express-rate-limit");
 const { RedisStore } = require("rate-limit-redis");
 const supabase = require("./lib/supabase");
 const redis = require("./lib/redis");
+const logger = require("./lib/logger");
+const { validateEnv, startupGuard } = require("./lib/env");
+
+// Validate env vars before registering any routes
+validateEnv();
 
 const app = express();
+
+// Reject all requests if required env vars are missing
+app.use(startupGuard);
 
 // Shared Redis client — lib/redis.js handles lazy-init and error recovery.
 // Falls back gracefully to null when REDIS_URL is not set.
@@ -251,10 +259,7 @@ app.use((_req, res) => {
 });
 
 // ── Error handler ───────────────────────────────────────────
-app.use((err, _req, res, _next) => {
-  console.error(err.stack);
-  res.status(500).json({ error: "Internal server error" });
-});
+app.use(logger.expressErrorHandler());
 
 // ── Start ────────────────────────────────────────────────────
 // On Vercel the file is imported as a module — Vercel owns the HTTP layer,
@@ -262,7 +267,7 @@ app.use((err, _req, res, _next) => {
 if (require.main === module) {
   const PORT = process.env.PORT || 3001;
   const server = app.listen(PORT, () => {
-    console.log(`StayKaro LMS API running on port ${PORT} (pid ${process.pid})`);
+    logger.info('StayKaro LMS API started', { port: PORT, pid: process.pid, nodeEnv: process.env.NODE_ENV || 'development' });
   });
   // Keep-alive timeout must exceed the load-balancer idle timeout (60s on Render)
   // to prevent random 502s under sustained load.

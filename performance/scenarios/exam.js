@@ -15,7 +15,7 @@
 //           performance\scenarios\exam.js
 
 import http from 'k6/http';
-import { check, sleep } from 'k6';
+import { check, sleep, fail } from 'k6';
 import { textSummary } from 'https://jslib.k6.io/k6-summary/0.0.1/index.js';
 import {
   examFlow,
@@ -92,8 +92,7 @@ export function setup() {
   const password = __ENV.STUDENT_PASSWORD || '';
 
   if (!email || !password) {
-    console.error('[setup] STUDENT_EMAIL and STUDENT_PASSWORD must be set');
-    return { token: null, testId: null, questions: [] };
+    fail('[setup] FATAL: STUDENT_EMAIL and STUDENT_PASSWORD env vars must be set. Aborting.');
   }
 
   // Single login for the entire test run
@@ -104,15 +103,13 @@ export function setup() {
   );
 
   if (loginRes.status !== 200) {
-    console.error(`[setup] Login failed — HTTP ${loginRes.status}: ${loginRes.body.slice(0, 200)}`);
-    return { token: null, testId: null, questions: [] };
+    fail(`[setup] FATAL: Login failed — HTTP ${loginRes.status}: ${loginRes.body.slice(0, 200)}`);
   }
 
   let token;
   try { token = JSON.parse(loginRes.body).data.session.access_token; }
   catch {
-    console.error('[setup] Cannot parse token from login response');
-    return { token: null, testId: null, questions: [] };
+    fail('[setup] FATAL: Cannot parse token from login response — check API response format');
   }
 
   console.log(`[setup] Login OK — token: ${token.slice(0, 20)}...`);
@@ -142,7 +139,11 @@ export function setup() {
           console.log(`[setup] Questions: ${qs.length}`);
         }
       } else {
-        console.warn('[setup] No published tests — VUs will test dashboard+list only');
+        // Hard abort — running 22 minutes only to exercise the tests-list endpoint is wasteful.
+        // Fix: apply supabase/migrations/20260715000001_add_tests_rls_policies.sql, then
+        // run backend/migrations/seed_exam_data.sql in the Supabase SQL Editor.
+        fail('[setup] FATAL: 0 published tests visible to student — exam pipeline cannot run. ' +
+             'Apply the RLS policy migration and seed the exam data, then retry.');
       }
     } catch (e) {
       console.warn(`[setup] Could not parse tests: ${e}`);

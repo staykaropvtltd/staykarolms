@@ -6,7 +6,9 @@
 const Redis = require("ioredis");
 
 let _client = null;
-let _failed  = false; // don't retry after a hard failure
+let _failed  = false; // set after repeated errors — stops retrying dead connections
+let _errorCount = 0;
+const MAX_ERRORS_BEFORE_CIRCUIT_OPEN = 5;
 
 function getClient() {
   if (!process.env.REDIS_URL) return null;
@@ -22,7 +24,17 @@ function getClient() {
   });
 
   _client.on("error", (err) => {
-    console.warn("[Redis] error:", err.message);
+    _errorCount++;
+    console.warn(`[Redis] error (${_errorCount}/${MAX_ERRORS_BEFORE_CIRCUIT_OPEN}):`, err.message);
+    if (_errorCount >= MAX_ERRORS_BEFORE_CIRCUIT_OPEN) {
+      _failed = true;
+      _client = null;
+      console.error("[Redis] circuit open — Redis disabled until process restart");
+    }
+  });
+
+  _client.on("connect", () => {
+    _errorCount = 0; // reset on successful connection
   });
 
   return _client;
