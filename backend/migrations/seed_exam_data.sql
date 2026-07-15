@@ -126,53 +126,59 @@ BEGIN
     RAISE NOTICE 'Created test id: %', v_test_id;
   END IF;
 
-  -- ── Insert 5 MCQ questions (skip if already present) ─────
-  INSERT INTO public.test_questions
-    (test_id, question, type, options, correct_answer, marks, order_index)
-  VALUES
-    (
-      v_test_id,
-      'What does HTTP stand for?',
-      'mcq',
-      '["HyperText Transfer Protocol","High Transfer Text Protocol","Hyperlink Text Protocol","HyperText Template Protocol"]',
-      'HyperText Transfer Protocol',
-      2, 1
-    ),
-    (
-      v_test_id,
-      'Which data structure follows Last-In-First-Out (LIFO) ordering?',
-      'mcq',
-      '["Queue","Stack","Linked List","Binary Tree"]',
-      'Stack',
-      2, 2
-    ),
-    (
-      v_test_id,
-      'What is the time complexity of binary search on a sorted array?',
-      'mcq',
-      '["O(n)","O(n²)","O(log n)","O(1)"]',
-      'O(log n)',
-      2, 3
-    ),
-    (
-      v_test_id,
-      'Which SQL keyword retrieves only unique values from a column?',
-      'mcq',
-      '["UNIQUE","DISTINCT","ONLY","FILTER"]',
-      'DISTINCT',
-      2, 4
-    ),
-    (
-      v_test_id,
-      'In REST APIs, which HTTP method is used to update an existing resource?',
-      'mcq',
-      '["GET","POST","PUT","DELETE"]',
-      'PUT',
-      2, 5
-    )
-  ON CONFLICT DO NOTHING;
-
-  RAISE NOTICE 'Questions seeded for test %', v_test_id;
+  -- ── Insert 5 MCQ questions only if none exist yet ────────
+  -- ON CONFLICT DO NOTHING without a unique column target is a no-op when
+  -- id is auto-generated, so we guard with an existence check instead.
+  IF NOT EXISTS (
+    SELECT 1 FROM public.test_questions WHERE test_id = v_test_id LIMIT 1
+  ) THEN
+    INSERT INTO public.test_questions
+      (test_id, question, type, options, correct_answer, marks, order_index)
+    VALUES
+      (
+        v_test_id,
+        'What does HTTP stand for?',
+        'mcq',
+        '["HyperText Transfer Protocol","High Transfer Text Protocol","Hyperlink Text Protocol","HyperText Template Protocol"]',
+        'HyperText Transfer Protocol',
+        2, 1
+      ),
+      (
+        v_test_id,
+        'Which data structure follows Last-In-First-Out (LIFO) ordering?',
+        'mcq',
+        '["Queue","Stack","Linked List","Binary Tree"]',
+        'Stack',
+        2, 2
+      ),
+      (
+        v_test_id,
+        'What is the time complexity of binary search on a sorted array?',
+        'mcq',
+        '["O(n)","O(n²)","O(log n)","O(1)"]',
+        'O(log n)',
+        2, 3
+      ),
+      (
+        v_test_id,
+        'Which SQL keyword retrieves only unique values from a column?',
+        'mcq',
+        '["UNIQUE","DISTINCT","ONLY","FILTER"]',
+        'DISTINCT',
+        2, 4
+      ),
+      (
+        v_test_id,
+        'In REST APIs, which HTTP method is used to update an existing resource?',
+        'mcq',
+        '["GET","POST","PUT","DELETE"]',
+        'PUT',
+        2, 5
+      );
+    RAISE NOTICE 'Questions seeded for test %', v_test_id;
+  ELSE
+    RAISE NOTICE 'Questions already exist for test % — skipping insert.', v_test_id;
+  END IF;
 
 END $$;
 
