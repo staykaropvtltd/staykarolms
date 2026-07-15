@@ -108,6 +108,35 @@ router.post(
   }
 );
 
+// GET /api/tests/:id/attempts — all student attempts for a test (admin/faculty only)
+router.get(
+  "/:id/attempts",
+  authenticate,
+  requireRole("admin", "faculty", "super-admin"),
+  async (req, res, next) => {
+    try {
+      let query = supabase
+        .from("test_attempts")
+        .select(`
+          id,
+          status,
+          score,
+          started_at,
+          submitted_at,
+          profiles:student_id ( id, name, email )
+        `)
+        .eq("test_id", req.params.id)
+        .order("submitted_at", { ascending: false });
+
+      const { data, error } = await query;
+      if (error) return res.status(400).json({ error: error.message });
+      return res.json({ data: data || [] });
+    } catch (err) {
+      return next(err);
+    }
+  }
+);
+
 // GET /api/tests/:id — test with questions
 router.get("/:id", authenticate, async (req, res, next) => {
   try {

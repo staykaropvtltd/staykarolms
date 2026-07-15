@@ -1,8 +1,11 @@
 import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { Plus, Search, Filter, ClipboardList, Clock, Calendar, CheckCircle2, ChevronRight, GripVertical, Trash2, Edit2, Play, Users, Loader2, Upload, FileText } from "lucide-react";
-import type { UserType } from "@/shared/userTypes";
-import { getTests, createTest, addTestQuestion, publishTest, getBatches } from "@/shared/lib/api";
+import {
+  Plus, Search, Filter, ClipboardList, Clock, Calendar, CheckCircle2,
+  ChevronRight, GripVertical, Trash2, Edit2, Play, Users, Loader2,
+  Upload, X, Award, User, TrendingUp,
+} from "lucide-react";
+import { getTests, createTest, addTestQuestion, publishTest, updateTest, deleteTest, getTestAttempts, getBatches } from "@/shared/lib/api";
 import { toast } from "sonner";
 
 interface TestManagementPageProps {
@@ -25,9 +28,7 @@ export function TestManagementPage({ userType }: TestManagementPageProps) {
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-8">
         <div>
           <h1 className="text-3xl font-bold text-foreground tracking-tight mb-2">Test Management</h1>
-          <p className="text-muted-foreground">
-            Create and manage coding, aptitude, and mock interview tests.
-          </p>
+          <p className="text-muted-foreground">Create and manage coding, aptitude, and mock interview tests.</p>
         </div>
         <div className="flex bg-card p-1 rounded-xl border shadow-sm">
           <button
@@ -76,14 +77,237 @@ export function TestManagementPage({ userType }: TestManagementPageProps) {
   );
 }
 
-// ── All Tests Tab ──────────────────────────────────────────────────────────
+// ── Edit Test Modal ───────────────────────────────────────────────────────────
 
+function EditTestModal({ test, onClose, onSaved }: { test: any; onClose: () => void; onSaved: () => void }) {
+  const [form, setForm] = useState({
+    title: test.title ?? "",
+    type: test.type ?? "aptitude",
+    duration_mins: test.duration_mins ?? 60,
+    scheduled_at: test.scheduled_at ? test.scheduled_at.slice(0, 16) : "",
+  });
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = async () => {
+    if (!form.title.trim()) { toast.error("Title is required"); return; }
+    setSaving(true);
+    const { error } = await updateTest(test.id, {
+      title: form.title.trim(),
+      type: form.type as "coding" | "aptitude" | "mock",
+      duration_mins: Number(form.duration_mins),
+      scheduled_at: form.scheduled_at || undefined,
+    });
+    setSaving(false);
+    if (error) { toast.error(error); return; }
+    toast.success("Test updated");
+    onSaved();
+    onClose();
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+      <div className="bg-card border border-border rounded-2xl w-full max-w-lg shadow-2xl">
+        <div className="flex items-center justify-between p-6 border-b border-border">
+          <h3 className="text-lg font-bold">Edit Test</h3>
+          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+        <div className="p-6 space-y-4">
+          <div className="space-y-2">
+            <label className="text-sm font-semibold">Test Title</label>
+            <input
+              type="text"
+              value={form.title}
+              onChange={(e) => setForm({ ...form, title: e.target.value })}
+              className="w-full px-4 py-2 bg-background border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <label className="text-sm font-semibold">Type</label>
+              <select
+                value={form.type}
+                onChange={(e) => setForm({ ...form, type: e.target.value })}
+                className="w-full px-3 py-2 bg-background border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20"
+              >
+                <option value="coding">Coding</option>
+                <option value="aptitude">Aptitude</option>
+                <option value="mock">Mock</option>
+              </select>
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-semibold">Duration (mins)</label>
+              <input
+                type="number"
+                value={form.duration_mins}
+                onChange={(e) => setForm({ ...form, duration_mins: parseInt(e.target.value) || 60 })}
+                className="w-full px-3 py-2 bg-background border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20"
+              />
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-sm font-semibold">Scheduled Date & Time</label>
+            <input
+              type="datetime-local"
+              value={form.scheduled_at}
+              onChange={(e) => setForm({ ...form, scheduled_at: e.target.value })}
+              className="w-full px-4 py-2 bg-background border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20"
+            />
+          </div>
+        </div>
+        <div className="flex gap-3 p-6 pt-0">
+          <button
+            onClick={onClose}
+            className="flex-1 py-2.5 font-semibold border border-border rounded-xl hover:bg-muted transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-primary text-primary-foreground font-bold rounded-xl hover:opacity-90 disabled:opacity-50 transition-opacity"
+          >
+            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+            Save Changes
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Test Results Modal ────────────────────────────────────────────────────────
+
+function TestResultsModal({ test, onClose }: { test: any; onClose: () => void }) {
+  const [attempts, setAttempts] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    getTestAttempts(test.id).then(({ data }) => {
+      setAttempts(data || []);
+      setLoading(false);
+    });
+  }, [test.id]);
+
+  const submitted = attempts.filter((a) => a.status === "submitted");
+  const avgScore = submitted.length
+    ? Math.round(submitted.reduce((s: number, a: any) => s + (a.score || 0), 0) / submitted.length)
+    : 0;
+  const maxScore = submitted.length ? Math.max(...submitted.map((a: any) => a.score || 0)) : 0;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+      <div className="bg-card border border-border rounded-2xl w-full max-w-2xl shadow-2xl flex flex-col max-h-[90vh]">
+        <div className="flex items-center justify-between p-6 border-b border-border shrink-0">
+          <div>
+            <h3 className="text-lg font-bold">{test.title}</h3>
+            <p className="text-sm text-muted-foreground">Student Results</p>
+          </div>
+          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {loading ? (
+          <div className="flex items-center justify-center py-16">
+            <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+            <span className="ml-2 text-muted-foreground">Loading results…</span>
+          </div>
+        ) : attempts.length === 0 ? (
+          <div className="py-16 text-center text-muted-foreground">
+            <Users className="w-10 h-10 mx-auto mb-3 opacity-30" />
+            <p className="font-medium">No attempts yet</p>
+            <p className="text-sm">Students will appear here once they attempt this test.</p>
+          </div>
+        ) : (
+          <>
+            {/* Summary stats */}
+            <div className="grid grid-cols-3 gap-4 p-6 border-b border-border shrink-0">
+              <div className="text-center">
+                <p className="text-2xl font-bold text-foreground">{attempts.length}</p>
+                <p className="text-xs text-muted-foreground mt-1">Total Attempts</p>
+              </div>
+              <div className="text-center">
+                <p className="text-2xl font-bold" style={{ color: "var(--gold)" }}>{avgScore}</p>
+                <p className="text-xs text-muted-foreground mt-1">Avg Score</p>
+              </div>
+              <div className="text-center">
+                <p className="text-2xl font-bold text-green-600">{maxScore}</p>
+                <p className="text-xs text-muted-foreground mt-1">Highest Score</p>
+              </div>
+            </div>
+
+            {/* Attempt list */}
+            <div className="overflow-y-auto flex-1">
+              <table className="w-full text-sm">
+                <thead className="sticky top-0 bg-muted/80 backdrop-blur-sm text-muted-foreground">
+                  <tr>
+                    <th className="px-6 py-3 text-left font-semibold">Student</th>
+                    <th className="px-6 py-3 text-left font-semibold">Status</th>
+                    <th className="px-6 py-3 text-left font-semibold">Score</th>
+                    <th className="px-6 py-3 text-left font-semibold">Submitted</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {attempts.map((attempt: any) => (
+                    <tr key={attempt.id} className="hover:bg-muted/30 transition-colors">
+                      <td className="px-6 py-3">
+                        <div className="flex items-center gap-2">
+                          <div className="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center text-xs font-bold text-primary shrink-0">
+                            {attempt.profiles?.name?.[0]?.toUpperCase() ?? "?"}
+                          </div>
+                          <div>
+                            <p className="font-medium text-foreground">{attempt.profiles?.name ?? "Unknown"}</p>
+                            <p className="text-xs text-muted-foreground">{attempt.profiles?.email ?? ""}</p>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-6 py-3">
+                        <span className={`px-2 py-1 text-xs font-bold rounded-full ${
+                          attempt.status === "submitted"
+                            ? "bg-green-500/10 text-green-600"
+                            : "bg-yellow-500/10 text-yellow-600"
+                        }`}>
+                          {attempt.status === "submitted" ? "Submitted" : "In Progress"}
+                        </span>
+                      </td>
+                      <td className="px-6 py-3">
+                        {attempt.status === "submitted" ? (
+                          <span className="font-bold text-foreground">{attempt.score ?? 0}</span>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </td>
+                      <td className="px-6 py-3 text-muted-foreground text-xs">
+                        {attempt.submitted_at
+                          ? new Date(attempt.submitted_at).toLocaleString()
+                          : "—"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── All Tests Tab ──────────────────────────────────────────────────────────
 
 function AllTestsTab() {
   const [filterType, setFilterType] = useState("all");
   const [tests, setTests] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [editingTest, setEditingTest] = useState<any | null>(null);
+  const [resultsTest, setResultsTest] = useState<any | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const fetchTests = async () => {
     setLoading(true);
@@ -103,22 +327,48 @@ function AllTestsTab() {
     fetchTests();
   };
 
-  const filtered = tests.filter(t => !search || t.title?.toLowerCase().includes(search.toLowerCase()));
-  
+  const handleDelete = async (testId: string, title: string) => {
+    if (!window.confirm(`Delete "${title}"? This cannot be undone.`)) return;
+    setDeletingId(testId);
+    const { error } = await deleteTest(testId);
+    setDeletingId(null);
+    if (error) { toast.error(error); return; }
+    toast.success("Test deleted");
+    fetchTests();
+  };
+
+  const filtered = tests.filter((t) =>
+    !search || t.title?.toLowerCase().includes(search.toLowerCase())
+  );
+
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row gap-4">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-          <input
-            type="text"
-            placeholder="Search tests..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-full pl-9 pr-4 py-2 bg-card border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 text-sm"
-          />
-        </div>
-        <div className="flex gap-2">
+    <>
+      {editingTest && (
+        <EditTestModal
+          test={editingTest}
+          onClose={() => setEditingTest(null)}
+          onSaved={fetchTests}
+        />
+      )}
+      {resultsTest && (
+        <TestResultsModal
+          test={resultsTest}
+          onClose={() => setResultsTest(null)}
+        />
+      )}
+
+      <div className="space-y-6">
+        <div className="flex flex-col sm:flex-row gap-4">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+            <input
+              type="text"
+              placeholder="Search tests…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-full pl-9 pr-4 py-2 bg-card border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20 text-sm"
+            />
+          </div>
           <select
             value={filterType}
             onChange={(e) => setFilterType(e.target.value)}
@@ -129,88 +379,124 @@ function AllTestsTab() {
             <option value="aptitude">Aptitude</option>
             <option value="mock">Mock</option>
           </select>
-          <button className="p-2 border rounded-xl bg-card hover:bg-muted text-muted-foreground transition-colors">
-            <Filter className="w-5 h-5" />
-          </button>
         </div>
-      </div>
 
-      {loading ? (
-        <div className="flex items-center justify-center py-20 bg-card border rounded-2xl">
-          <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-          <span className="ml-2 text-muted-foreground">Loading tests…</span>
-        </div>
-      ) : filtered.length === 0 ? (
-        <div className="py-20 text-center text-muted-foreground bg-card border rounded-2xl">
-          <ClipboardList className="w-10 h-10 mx-auto mb-2 opacity-30" />
-          No tests found. Create one to get started.
-        </div>
-      ) : (
-      <div className="bg-card border rounded-2xl overflow-hidden shadow-sm">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm">
-            <thead className="bg-muted/50 text-muted-foreground font-medium border-b">
-              <tr>
-                <th className="px-6 py-4">Test Title</th>
-                <th className="px-6 py-4">Type</th>
-                <th className="px-6 py-4">Questions</th>
-                <th className="px-6 py-4">Schedule</th>
-                <th className="px-6 py-4">Status</th>
-                <th className="px-6 py-4">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              {filtered.map((test: any) => (
-                <tr key={test.id} className="hover:bg-muted/30 transition-colors">
-                  <td className="px-6 py-4 font-semibold text-foreground">{test.title}</td>
-                  <td className="px-6 py-4">
-                    <span className={`px-2.5 py-1 text-xs font-bold rounded-full ${
-                      test.type === "coding" ? "bg-blue-500/10 text-blue-600 dark:text-blue-400" :
-                      test.type === "aptitude" ? "bg-purple-500/10 text-purple-600 dark:text-purple-400" :
-                      "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-                    }`}>
-                      {test.type?.toUpperCase()}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 text-muted-foreground">{test.test_questions?.[0]?.count ?? 0} Qs</td>
-                  <td className="px-6 py-4">
-                    <div className="flex items-center gap-2 text-muted-foreground">
-                      <Calendar className="w-4 h-4" />
-                      <span>{test.scheduled_at ? new Date(test.scheduled_at).toLocaleDateString() : "—"}</span>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4">
-                    <span className={`px-2.5 py-1 text-xs font-bold rounded-full border ${
-                      test.status === "published" ? "bg-green-500/10 text-green-600 border-green-500/20" :
-                      test.status === "completed" ? "bg-gray-500/10 text-gray-600 dark:text-gray-400 border-gray-500/20" :
-                      "bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 border-yellow-500/20"
-                    }`}>
-                      {test.status?.toUpperCase()}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4">
-                    <div className="flex items-center gap-2">
-                      <button className="p-1.5 hover:bg-muted rounded-lg text-muted-foreground transition-colors" title="Edit">
-                        <Edit2 className="w-4 h-4" />
-                      </button>
-                      <button className="p-1.5 hover:bg-muted rounded-lg text-muted-foreground transition-colors" title="View Results">
-                        <Users className="w-4 h-4" />
-                      </button>
-                      {test.status === "draft" && (
-                        <button onClick={() => handlePublish(test.id)} className="p-1.5 hover:bg-green-500/10 hover:text-green-600 rounded-lg text-muted-foreground transition-colors" title="Publish">
-                          <Play className="w-4 h-4" />
-                        </button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        {loading ? (
+          <div className="flex items-center justify-center py-20 bg-card border rounded-2xl">
+            <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+            <span className="ml-2 text-muted-foreground">Loading tests…</span>
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="py-20 text-center text-muted-foreground bg-card border rounded-2xl">
+            <ClipboardList className="w-10 h-10 mx-auto mb-2 opacity-30" />
+            <p className="font-medium">No tests found.</p>
+            <p className="text-sm mt-1">Create one to get started.</p>
+          </div>
+        ) : (
+          <div className="bg-card border rounded-2xl overflow-hidden shadow-sm">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm">
+                <thead className="bg-muted/50 text-muted-foreground font-medium border-b">
+                  <tr>
+                    <th className="px-6 py-4">Test Title</th>
+                    <th className="px-6 py-4">Type</th>
+                    <th className="px-6 py-4">Questions</th>
+                    <th className="px-6 py-4">Created By</th>
+                    <th className="px-6 py-4">Schedule</th>
+                    <th className="px-6 py-4">Status</th>
+                    <th className="px-6 py-4">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {filtered.map((test: any) => (
+                    <tr key={test.id} className="hover:bg-muted/30 transition-colors">
+                      <td className="px-6 py-4 font-semibold text-foreground max-w-xs">
+                        <p className="truncate">{test.title}</p>
+                        {test.duration_mins && (
+                          <p className="text-xs text-muted-foreground font-normal flex items-center gap-1 mt-0.5">
+                            <Clock className="w-3 h-3" /> {test.duration_mins} min
+                          </p>
+                        )}
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className={`px-2.5 py-1 text-xs font-bold rounded-full ${
+                          test.type === "coding"   ? "bg-blue-500/10 text-blue-600 dark:text-blue-400" :
+                          test.type === "aptitude" ? "bg-purple-500/10 text-purple-600 dark:text-purple-400" :
+                                                     "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                        }`}>
+                          {test.type?.toUpperCase()}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 text-muted-foreground">
+                        {test.test_questions?.[0]?.count ?? 0} Qs
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-1.5 text-muted-foreground">
+                          <User className="w-3.5 h-3.5 shrink-0" />
+                          <span className="text-sm">{test.profiles?.name ?? "—"}</span>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-2 text-muted-foreground">
+                          <Calendar className="w-4 h-4" />
+                          <span>{test.scheduled_at ? new Date(test.scheduled_at).toLocaleDateString() : "—"}</span>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className={`px-2.5 py-1 text-xs font-bold rounded-full border ${
+                          test.status === "published" ? "bg-green-500/10 text-green-600 border-green-500/20" :
+                          test.status === "completed" ? "bg-gray-500/10 text-gray-600 dark:text-gray-400 border-gray-500/20" :
+                                                        "bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 border-yellow-500/20"
+                        }`}>
+                          {test.status?.toUpperCase()}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => setEditingTest(test)}
+                            className="p-1.5 hover:bg-primary/10 hover:text-primary rounded-lg text-muted-foreground transition-colors"
+                            title="Edit test"
+                          >
+                            <Edit2 className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => setResultsTest(test)}
+                            className="p-1.5 hover:bg-blue-500/10 hover:text-blue-600 rounded-lg text-muted-foreground transition-colors"
+                            title="View student results"
+                          >
+                            <Users className="w-4 h-4" />
+                          </button>
+                          {test.status === "draft" && (
+                            <button
+                              onClick={() => handlePublish(test.id)}
+                              className="p-1.5 hover:bg-green-500/10 hover:text-green-600 rounded-lg text-muted-foreground transition-colors"
+                              title="Publish test"
+                            >
+                              <Play className="w-4 h-4" />
+                            </button>
+                          )}
+                          <button
+                            onClick={() => handleDelete(test.id, test.title)}
+                            disabled={deletingId === test.id}
+                            className="p-1.5 hover:bg-red-500/10 hover:text-red-500 rounded-lg text-muted-foreground transition-colors disabled:opacity-40"
+                            title="Delete test"
+                          >
+                            {deletingId === test.id
+                              ? <Loader2 className="w-4 h-4 animate-spin" />
+                              : <Trash2 className="w-4 h-4" />}
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
       </div>
-      )}
-    </div>
+    </>
   );
 }
 
@@ -290,11 +576,10 @@ function CreateTestTab({ step, setStep, onCreated }: { step: number; setStep: (s
       {/* Stepper */}
       <div className="flex items-center justify-between mb-8 relative">
         <div className="absolute left-0 top-1/2 -translate-y-1/2 w-full h-1 bg-muted rounded-full -z-10" />
-        <div 
+        <div
           className="absolute left-0 top-1/2 -translate-y-1/2 h-1 bg-primary rounded-full -z-10 transition-all duration-300"
           style={{ width: `${((step - 1) / 2) * 100}%` }}
         />
-        
         {[1, 2, 3].map((s) => (
           <div key={s} className="flex flex-col items-center gap-2">
             <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm transition-colors ${
@@ -317,7 +602,15 @@ function CreateTestTab({ step, setStep, onCreated }: { step: number; setStep: (s
           <Step2Questions questions={questions} setQuestions={setQuestions} onNext={handleNext} onPrev={handlePrev} />
         )}
         {step === 3 && (
-          <Step3Review formData={formData} questions={questions} onPublish={handlePublish} onSaveDraft={handleSaveDraft} onPrev={handlePrev} publishing={publishing} saving={saving} />
+          <Step3Review
+            formData={formData}
+            questions={questions}
+            onPublish={handlePublish}
+            onSaveDraft={handleSaveDraft}
+            onPrev={handlePrev}
+            publishing={publishing}
+            saving={saving}
+          />
         )}
       </div>
     </div>
@@ -331,7 +624,7 @@ function Step1Details({ formData, setFormData, onNext, batches = [] }: any) {
         <h2 className="text-xl font-bold mb-1">Test Details</h2>
         <p className="text-sm text-muted-foreground">Configure the basic settings for this test.</p>
       </div>
-      
+
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div className="space-y-2">
           <label className="text-sm font-semibold">Test Title</label>
@@ -343,7 +636,7 @@ function Step1Details({ formData, setFormData, onNext, batches = [] }: any) {
             className="w-full px-4 py-2 bg-background border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20"
           />
         </div>
-        
+
         <div className="space-y-2">
           <label className="text-sm font-semibold">Test Type</label>
           <select
@@ -356,7 +649,7 @@ function Step1Details({ formData, setFormData, onNext, batches = [] }: any) {
             <option value="mock">Mock Interview</option>
           </select>
         </div>
-        
+
         <div className="space-y-2">
           <label className="text-sm font-semibold">Target Batch</label>
           <select
@@ -364,13 +657,13 @@ function Step1Details({ formData, setFormData, onNext, batches = [] }: any) {
             onChange={(e) => setFormData({ ...formData, batch_id: e.target.value })}
             className="w-full px-4 py-2 bg-background border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20"
           >
-            <option value="">Select a batch...</option>
+            <option value="">All students</option>
             {batches.map((b: any) => (
               <option key={b.id} value={b.id}>{b.name}</option>
             ))}
           </select>
         </div>
-        
+
         <div className="space-y-2">
           <label className="text-sm font-semibold">Duration (minutes)</label>
           <input
@@ -380,7 +673,7 @@ function Step1Details({ formData, setFormData, onNext, batches = [] }: any) {
             className="w-full px-4 py-2 bg-background border rounded-xl focus:outline-none focus:ring-2 focus:ring-primary/20"
           />
         </div>
-        
+
         <div className="space-y-2 md:col-span-2">
           <label className="text-sm font-semibold">Scheduled Date & Time</label>
           <input
@@ -391,7 +684,7 @@ function Step1Details({ formData, setFormData, onNext, batches = [] }: any) {
           />
         </div>
       </div>
-      
+
       <div className="flex justify-end pt-4">
         <button
           onClick={onNext}
@@ -478,7 +771,9 @@ function ImportQuestionsModal({ onClose, onImported }: { onClose: () => void; on
       <div className="bg-card border border-border rounded-xl w-full max-w-lg shadow-xl">
         <div className="flex items-center justify-between p-5 border-b border-border">
           <h3 className="font-semibold text-foreground">Import Questions from File</h3>
-          <button onClick={onClose} className="text-muted-foreground hover:text-foreground"><Trash2 className="w-4 h-4" /></button>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground p-1">
+            <X className="w-4 h-4" />
+          </button>
         </div>
         <div className="p-5 space-y-4">
           <div className="text-xs text-muted-foreground bg-muted/40 rounded-lg p-3 space-y-1">
@@ -582,7 +877,7 @@ function Step2Questions({ questions, setQuestions, onNext, onPrev }: any) {
               </div>
               <p className="text-sm font-medium">{q.question}</p>
             </div>
-            <button 
+            <button
               onClick={() => setQuestions(questions.filter((_: any, idx: number) => idx !== i))}
               className="p-1.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-950 rounded-lg transition-colors"
             >
@@ -632,7 +927,7 @@ function Step2Questions({ questions, setQuestions, onNext, onPrev }: any) {
                 onChange={(e) => setNewQ({ ...newQ, question: e.target.value })}
                 rows={3}
                 className="w-full px-3 py-2 text-sm bg-background border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20"
-                placeholder="Enter your question here..."
+                placeholder="Enter your question here…"
               />
             </div>
 
@@ -640,7 +935,7 @@ function Step2Questions({ questions, setQuestions, onNext, onPrev }: any) {
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <label className="text-xs font-bold">Answer Options</label>
-                  <span className="text-xs text-muted-foreground bg-muted px-2 py-1 rounded">Click the circle to mark the correct answer</span>
+                  <span className="text-xs text-muted-foreground bg-muted px-2 py-1 rounded">Click the circle to mark correct answer</span>
                 </div>
                 {newQ.options.map((opt, idx) => {
                   const isCorrect = newQ.correct_answer === idx.toString();
@@ -652,7 +947,6 @@ function Step2Questions({ questions, setQuestions, onNext, onPrev }: any) {
                         isCorrect ? "border-green-500 bg-green-500/5" : "border-muted bg-background"
                       }`}
                     >
-                      {/* Correct answer selector */}
                       <button
                         type="button"
                         onClick={() => setNewQ({ ...newQ, correct_answer: idx.toString() })}
@@ -667,15 +961,11 @@ function Step2Questions({ questions, setQuestions, onNext, onPrev }: any) {
                           <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                         </svg>
                       </button>
-
-                      {/* Option letter */}
                       <span className={`w-6 h-6 rounded-md flex items-center justify-center text-xs font-black shrink-0 ${
                         isCorrect ? "bg-green-500 text-white" : "bg-muted text-muted-foreground"
                       }`}>
                         {letter}
                       </span>
-
-                      {/* Option text input */}
                       <input
                         type="text"
                         value={opt}
@@ -687,24 +977,16 @@ function Step2Questions({ questions, setQuestions, onNext, onPrev }: any) {
                         className="flex-1 px-3 py-1.5 text-sm bg-transparent border border-muted rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20"
                         placeholder={`Option ${letter}`}
                       />
-
-                      {/* Correct badge */}
                       {isCorrect && (
                         <span className="text-xs font-bold text-green-600 bg-green-500/10 px-2 py-1 rounded-lg shrink-0 flex items-center gap-1">
-                          <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
-                          Correct
+                          <CheckCircle2 className="w-3 h-3" /> Correct
                         </span>
                       )}
                     </div>
                   );
                 })}
-                <p className="text-xs text-muted-foreground flex items-center gap-1.5 pt-1">
-                  <svg className="w-3.5 h-3.5 text-green-500" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" /></svg>
-                  Option <span className="font-bold text-green-600">{String.fromCharCode(65 + parseInt(newQ.correct_answer || "0"))}</span> is marked as correct. Click any circle to change it.
-                </p>
               </div>
             )}
-
 
             <div className="flex justify-end gap-3 pt-2">
               <button onClick={() => setIsAdding(false)} className="px-4 py-2 text-sm font-semibold hover:bg-muted rounded-lg">Cancel</button>
@@ -717,9 +999,7 @@ function Step2Questions({ questions, setQuestions, onNext, onPrev }: any) {
       </div>
 
       <div className="flex justify-between pt-4">
-        <button onClick={onPrev} className="px-6 py-2.5 font-bold hover:bg-muted rounded-xl transition-colors">
-          Back
-        </button>
+        <button onClick={onPrev} className="px-6 py-2.5 font-bold hover:bg-muted rounded-xl transition-colors">Back</button>
         <button
           onClick={onNext}
           className="flex items-center gap-2 px-6 py-2.5 bg-primary text-primary-foreground font-bold rounded-xl hover:opacity-90 transition-opacity"
@@ -754,19 +1034,19 @@ function Step3Review({ formData, questions, onPublish, onSaveDraft, onPrev, publ
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <div className="space-y-1">
-            <span className="text-xs text-muted-foreground flex items-center gap-1"><Clock className="w-3 h-3"/> Duration</span>
+            <span className="text-xs text-muted-foreground flex items-center gap-1"><Clock className="w-3 h-3" /> Duration</span>
             <p className="font-semibold">{formData.duration_mins} mins</p>
           </div>
           <div className="space-y-1">
-            <span className="text-xs text-muted-foreground flex items-center gap-1"><Calendar className="w-3 h-3"/> Schedule</span>
+            <span className="text-xs text-muted-foreground flex items-center gap-1"><Calendar className="w-3 h-3" /> Schedule</span>
             <p className="font-semibold text-sm">{formData.scheduled_at ? new Date(formData.scheduled_at).toLocaleString() : "Not set"}</p>
           </div>
           <div className="space-y-1">
-            <span className="text-xs text-muted-foreground flex items-center gap-1"><Users className="w-3 h-3"/> Batch</span>
-            <p className="font-semibold text-sm">{formData.batch_id || "All"}</p>
+            <span className="text-xs text-muted-foreground flex items-center gap-1"><Users className="w-3 h-3" /> Batch</span>
+            <p className="font-semibold text-sm">{formData.batch_id || "All students"}</p>
           </div>
           <div className="space-y-1">
-            <span className="text-xs text-muted-foreground flex items-center gap-1"><CheckCircle2 className="w-3 h-3"/> Total Marks</span>
+            <span className="text-xs text-muted-foreground flex items-center gap-1"><Award className="w-3 h-3" /> Total Marks</span>
             <p className="font-semibold text-sm">{totalMarks}</p>
           </div>
         </div>
@@ -790,7 +1070,8 @@ function Step3Review({ formData, questions, onPublish, onSaveDraft, onPrev, publ
             disabled={publishing || saving}
             className="flex items-center gap-2 px-6 py-2.5 bg-primary text-primary-foreground font-bold rounded-xl hover:opacity-90 transition-opacity disabled:opacity-50"
           >
-            {publishing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4 fill-current" />} Publish Test
+            {publishing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4 fill-current" />}
+            Publish Test
           </button>
         </div>
       </div>

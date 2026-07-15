@@ -284,6 +284,24 @@ export const addTestQuestion = (
 export const publishTest = (testId: string) =>
   apiFetch(`/api/tests/${testId}/publish`, { method: "PUT" });
 
+export const updateTest = (
+  testId: string,
+  payload: {
+    title?: string;
+    type?: "coding" | "aptitude" | "mock";
+    duration_mins?: number;
+    scheduled_at?: string;
+    batch_id?: string;
+    status?: string;
+  }
+) => apiFetch(`/api/tests/${testId}`, { method: "PUT", body: JSON.stringify(payload) });
+
+export const deleteTest = (testId: string) =>
+  apiFetch(`/api/tests/${testId}`, { method: "DELETE" });
+
+export const getTestAttempts = (testId: string) =>
+  apiFetch(`/api/tests/${testId}/attempts`);
+
 // ── Attempts ─────────────────────────────────────────────────────────────────
 
 export const startAttempt = (testId: string) =>

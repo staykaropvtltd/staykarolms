@@ -145,10 +145,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       if (session) {
-        if (event === "SIGNED_IN" || event === "TOKEN_REFRESHED" || event === "INITIAL_SESSION") {
+        if (event === "SIGNED_IN" || event === "INITIAL_SESSION") {
           setIsLoading(true);
           await fetchProfile(buildFallbackUser(session));
           if (mounted) setIsLoading(false);
+        } else if (event === "TOKEN_REFRESHED") {
+          // Token refresh does not change identity — cached token is already updated above.
+          // Do NOT show the loading spinner; that would look like a page reload to the user.
+          fetchProfile(buildFallbackUser(session));
         }
       } else {
         // Only reset user state on explicit sign-out, not on transient null sessions
