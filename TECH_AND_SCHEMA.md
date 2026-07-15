@@ -266,7 +266,7 @@ Exams (aptitude, coding, mock).
 | `test_id` | uuid | FK → `tests` |
 | `question` | text | |
 | `type` | text | `'mcq' \| 'coding' \| 'short'` |
-| `options` | jsonb | array of strings for MCQ, e.g. `["A","B","C","D"]` |
+| `options` | text | JSON-encoded array of strings for MCQ, e.g. `'["A","B","C","D"]'` — parse with `JSON.parse()` |
 | `correct_answer` | text | stripped from student response |
 | `marks` | int | default 1 |
 | `order_index` | int | default 0 |
@@ -555,9 +555,9 @@ All routes are prefixed `/api/` and deployed at `https://staykarolmsbackend.verc
 | PUT | `/tests/:id/publish` | admin, faculty, super-admin | Publish + notify students |
 | GET | `/tests/:id` | all | Test detail + questions |
 | POST | `/tests/:id/questions` | admin, faculty, super-admin | Add question |
-| POST | `/attempts` | student | Start exam attempt |
-| PUT | `/attempts/:id/answer` | student | Save answer |
-| PUT | `/attempts/:id/submit` | student | Submit exam |
+| POST | `/attempts/start` | student | Start exam attempt |
+| POST | `/attempts/:id/answer` | student | Save answer |
+| POST | `/attempts/:id/submit` | student | Submit exam |
 | GET | `/notifications` | all | List notifications |
 | GET | `/notifications/unread/count` | all | Unread count |
 | GET | `/analytics/dashboard` | all | Role-based dashboard stats |
@@ -627,5 +627,7 @@ describe('GET /api/tests', () => {
 - Students get `status: 'published'` tests only — never drafts
 - `correct_answer` is stripped from question objects returned to students
 - `institution_id` scoping: users from institution A cannot see data from institution B
-- Attempt start returns `attempt_id`; subsequent answer saves use `PUT /attempts/:id/answer`
-- Submit sets `status: 'submitted'` and populates `score`
+- Attempt start (`POST /attempts/start`) returns `{ data: { id, status: 'in_progress', ... } }`; use that `id` for subsequent calls
+- Answer save: `POST /attempts/:id/answer` with `{ question_id, answer }`
+- Submit: `POST /attempts/:id/submit` — sets `status: 'submitted'` and populates `score`
+- `options` on questions is a JSON string; call `JSON.parse(q.options)` before using
