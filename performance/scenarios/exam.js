@@ -120,38 +120,44 @@ export function setup() {
   const testsRes = http.get(`${BASE_URL}/api/tests?status=published`, { headers });
   let testId    = null;
   let questions = [];
+  let tests     = [];
 
-  if (testsRes.status === 200) {
+  if (testsRes.status !== 200) {
+    fail(`[setup] FATAL: Tests endpoint returned HTTP ${testsRes.status} — cannot continue.`);
+  }
+
+  try {
+    tests = JSON.parse(testsRes.body)?.data || [];
+  } catch (e) {
+    fail(`[setup] FATAL: Cannot parse tests response: ${e}`);
+  }
+
+  console.log(`[setup] Published tests found: ${tests.length}`);
+
+  // Hard abort outside try/catch so fail() actually exits (GoError inside try/catch is swallowed)
+  if (tests.length === 0) {
+    fail('[setup] FATAL: 0 published tests visible to student — exam pipeline cannot run. ' +
+         'Apply the RLS policy migration and seed the exam data, then retry.');
+  }
+
+  // Prefer the seeded load-test exam (5 MCQ questions); fall back to first
+  const preferred = tests.find(t => t.title === 'Load Test Exam — MCQ Practice') || tests[0];
+  testId = preferred.id;
+  const title = preferred.title || '(untitled)';
+  console.log(`[setup] Using test: "${title}" (${testId})`);
+
+  // Fetch full test with questions
+  const detailRes = http.get(`${BASE_URL}/api/tests/${testId}`, { headers });
+  if (detailRes.status === 200) {
     try {
-      const tests = JSON.parse(testsRes.body)?.data || [];
-      console.log(`[setup] Published tests found: ${tests.length}`);
-
-      if (tests.length > 0) {
-        // Prefer the seeded load-test exam (has 5 MCQ questions); fall back to first
-        const preferred = tests.find(t => t.title === 'Load Test Exam — MCQ Practice') || tests[0];
-        testId = preferred.id;
-        const title = preferred.title || '(untitled)';
-        console.log(`[setup] Using test: "${title}" (${testId})`);
-
-        // Fetch full test with questions
-        const detailRes = http.get(`${BASE_URL}/api/tests/${testId}`, { headers });
-        if (detailRes.status === 200) {
-          const qs = JSON.parse(detailRes.body)?.data?.test_questions || [];
-          questions = qs;
-          console.log(`[setup] Questions: ${qs.length}`);
-        }
-      } else {
-        // Hard abort — running 22 minutes only to exercise the tests-list endpoint is wasteful.
-        // Fix: apply supabase/migrations/20260715000001_add_tests_rls_policies.sql, then
-        // run backend/migrations/seed_exam_data.sql in the Supabase SQL Editor.
-        fail('[setup] FATAL: 0 published tests visible to student — exam pipeline cannot run. ' +
-             'Apply the RLS policy migration and seed the exam data, then retry.');
-      }
+      const qs = JSON.parse(detailRes.body)?.data?.test_questions || [];
+      questions = qs;
+      console.log(`[setup] Questions: ${qs.length}`);
     } catch (e) {
-      console.warn(`[setup] Could not parse tests: ${e}`);
+      console.warn(`[setup] Could not parse test detail: ${e}`);
     }
   } else {
-    console.warn(`[setup] Tests endpoint returned HTTP ${testsRes.status}`);
+    console.warn(`[setup] Test detail returned HTTP ${detailRes.status}`);
   }
 
   return { token, testId, questions };
