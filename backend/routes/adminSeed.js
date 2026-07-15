@@ -113,6 +113,21 @@ router.post(
         .select("id", { count: "exact", head: true })
         .eq("test_id", testId);
 
+      // Diagnostic: run the exact query GET /api/tests uses
+      const { data: listResult, error: listErr } = await supabase
+        .from("tests")
+        .select(`*, profiles:created_by ( name ), batches:batch_id ( name ), test_questions ( count )`)
+        .eq("institution_id", institutionId)
+        .eq("status", "published")
+        .order("created_at", { ascending: false });
+
+      // Simple query (no joins)
+      const { data: simpleResult, error: simpleErr } = await supabase
+        .from("tests")
+        .select("id, title, status, institution_id")
+        .eq("institution_id", institutionId)
+        .eq("status", "published");
+
       return res.json({
         success: true,
         test_id: testId,
@@ -120,6 +135,11 @@ router.post(
         test_action: action,
         questions_action: questionsAction,
         question_count: finalCount,
+        diag_list_count: listResult?.length ?? null,
+        diag_list_error: listErr?.message ?? null,
+        diag_simple_count: simpleResult?.length ?? null,
+        diag_simple_error: simpleErr?.message ?? null,
+        diag_simple_data: simpleResult ?? null,
       });
     } catch (err) {
       return next(err);
