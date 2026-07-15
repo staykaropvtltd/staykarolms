@@ -128,6 +128,13 @@ router.post(
         .eq("institution_id", institutionId)
         .eq("status", "published");
 
+      // Run the tests list using req.user.institution_id (exactly as GET /api/tests does)
+      const { data: userScopedResult, error: userScopedErr } = await supabase
+        .from("tests")
+        .select("id, title, status, institution_id")
+        .eq("institution_id", req.user.institution_id)
+        .eq("status", "published");
+
       return res.json({
         success: true,
         test_id: testId,
@@ -135,11 +142,12 @@ router.post(
         test_action: action,
         questions_action: questionsAction,
         question_count: finalCount,
+        diag_req_user: req.user,
         diag_list_count: listResult?.length ?? null,
         diag_list_error: listErr?.message ?? null,
         diag_simple_count: simpleResult?.length ?? null,
-        diag_simple_error: simpleErr?.message ?? null,
-        diag_simple_data: simpleResult ?? null,
+        diag_user_scoped_count: userScopedResult?.length ?? null,
+        diag_user_scoped_error: userScopedErr?.message ?? null,
       });
     } catch (err) {
       return next(err);
