@@ -152,16 +152,15 @@ router.get(
   }
 );
 
-// GET /api/tests/:id/analytics — full analytics for admins/faculty
+// GET /api/tests/:id/analytics/summary — aggregate stats + question accuracy (no attempt list)
 router.get(
-  "/:id/analytics",
+  "/:id/analytics/summary",
   authenticate,
   requireRole("admin", "faculty", "super-admin"),
   async (req, res, next) => {
     try {
       const testId = req.params.id;
 
-      // Fetch test + questions + batch name, scoped to institution
       let testQuery = supabase
         .from("tests")
         .select(
@@ -176,28 +175,46 @@ router.get(
       const { data: test, error: testError } = await testQuery.single();
       if (testError || !test) return res.status(404).json({ error: "Test not found" });
 
+      // Best-effort institution name
+      let institutionName = null;
+      try {
+        const { data: inst } = await supabase
+          .from("institutions").select("name").eq("id", test.institution_id).maybeSingle();
+        institutionName = inst?.name ?? null;
+      } catch (_) {}
+
       const questions = (test.test_questions || []).sort(
         (a, b) => (a.order_index ?? 0) - (b.order_index ?? 0)
       );
       const totalQuestions = questions.length;
       const maxScore = questions.reduce((s, q) => s + (q.marks || 1), 0);
 
-      // All attempts with student profiles (including in-progress for total count)
-      const { data: attempts } = await supabase
+      // All attempts + profiles (lightweight — no answers)
+      const { data: allAttempts } = await supabase
         .from("test_attempts")
-        .select("id, status, score, started_at, submitted_at, profiles:student_id ( id, name, email, roll_number )")
-        .eq("test_id", testId)
-        .order("submitted_at", { ascending: false });
+        .select(
+          "id, status, score, started_at, submitted_at, auto_submitted, last_answered_at," +
+          " profiles:student_id ( id, name, email, roll_number )"
+        )
+        .eq("test_id", testId);
 
-      const allAttempts = attempts || [];
-      const submittedIds = allAttempts
-        .filter((a) => a.status === "submitted")
-        .map((a) => a.id);
+      const attempts = allAttempts || [];
+      const submitted = attempts.filter(a => a.status === "submitted");
+      const inProgress = attempts.filter(a => a.status === "in_progress");
+      const submittedIds = submitted.map(a => a.id);
 
-      // One query for all answers of submitted attempts — aggregate in JS
-      const attemptStats = {};  // { [attempt_id]: { correct, wrong, answered } }
-      const questionAccuracy = {}; // { [question_id]: { total, correct } }
+      // Batch enrollment count
+      let totalEnrolled = null;
+      if (test.batch_id) {
+        const { count } = await supabase
+          .from("batch_students")
+          .select("*", { count: "exact", head: true })
+          .eq("batch_id", test.batch_id);
+        totalEnrolled = count ?? null;
+      }
 
+      // Question-level answer stats (one query)
+      const qStats = {}; // { [question_id]: { total, correct, wrong } }
       if (submittedIds.length > 0) {
         const { data: allAnswers } = await supabase
           .from("test_answers")
@@ -205,77 +222,220 @@ router.get(
           .in("attempt_id", submittedIds);
 
         for (const ans of allAnswers || []) {
-          if (!attemptStats[ans.attempt_id]) {
-            attemptStats[ans.attempt_id] = { correct: 0, wrong: 0, answered: 0 };
-          }
-          const hasAnswer =
-            ans.answer !== null && ans.answer !== undefined && ans.answer !== "";
-          if (hasAnswer) {
-            attemptStats[ans.attempt_id].answered++;
-            if (ans.is_correct) attemptStats[ans.attempt_id].correct++;
-            else attemptStats[ans.attempt_id].wrong++;
-          }
-
-          if (!questionAccuracy[ans.question_id]) {
-            questionAccuracy[ans.question_id] = { total: 0, correct: 0 };
-          }
-          if (hasAnswer) {
-            questionAccuracy[ans.question_id].total++;
-            if (ans.is_correct) questionAccuracy[ans.question_id].correct++;
+          if (!qStats[ans.question_id]) qStats[ans.question_id] = { total: 0, correct: 0, wrong: 0 };
+          const has = ans.answer !== null && ans.answer !== undefined && ans.answer !== "";
+          if (has) {
+            qStats[ans.question_id].total++;
+            if (ans.is_correct) qStats[ans.question_id].correct++;
+            else qStats[ans.question_id].wrong++;
           }
         }
       }
 
-      // Augment each attempt with computed fields
-      const augmented = allAttempts.map((attempt) => {
-        const s = attemptStats[attempt.id] || { correct: 0, wrong: 0, answered: 0 };
-        const timeTakenSecs =
-          attempt.submitted_at && attempt.started_at
-            ? Math.max(
-                0,
-                Math.floor(
-                  (new Date(attempt.submitted_at) - new Date(attempt.started_at)) / 1000
-                )
-              )
-            : null;
-        const pct =
-          maxScore > 0 && attempt.score != null
-            ? Math.round((attempt.score / maxScore) * 100)
-            : 0;
-        return {
-          ...attempt,
-          correct: s.correct,
-          wrong: s.wrong,
-          answered: s.answered,
-          unanswered: totalQuestions - s.answered,
-          time_taken_secs: timeTakenSecs,
-          percentage: pct,
-          max_score: maxScore,
-        };
+      // Augmented submitted rows for stats
+      const subAug = submitted.map(a => {
+        const t = a.submitted_at && a.started_at
+          ? Math.max(0, Math.floor((new Date(a.submitted_at) - new Date(a.started_at)) / 1000))
+          : null;
+        const pct = maxScore > 0 && a.score != null ? Math.round((a.score / maxScore) * 100) : 0;
+        return { ...a, time_taken_secs: t, percentage: pct };
       });
 
-      // Enrich questions with normalised options + per-question accuracy
-      const enrichedQuestions = questions.map((q) => ({
-        ...q,
-        options: normalizeOptions(q.options),
-        stats: questionAccuracy[q.id] || { total: 0, correct: 0 },
+      const scores = subAug.map(a => a.score ?? 0);
+      const avgScore = scores.length ? Math.round(scores.reduce((s, v) => s + v, 0) / scores.length) : 0;
+      const highScore = scores.length ? Math.max(...scores) : 0;
+      const lowScore = scores.length ? Math.min(...scores) : 0;
+      const avgPct = subAug.length ? Math.round(subAug.reduce((s, a) => s + a.percentage, 0) / subAug.length) : 0;
+      const passCount = subAug.filter(a => a.percentage >= 40).length;
+      const failCount = subAug.length - passCount;
+      const passRate = subAug.length ? Math.round((passCount / subAug.length) * 100) : 0;
+      const autoSubmittedCount = submitted.filter(a => a.auto_submitted).length;
+
+      const withTime = subAug.filter(a => a.time_taken_secs !== null)
+        .sort((a, b) => a.time_taken_secs - b.time_taken_secs);
+      const avgTimeSecs = withTime.length
+        ? Math.round(withTime.reduce((s, a) => s + a.time_taken_secs, 0) / withTime.length)
+        : null;
+
+      const mkPerson = a => ({
+        id: a.id, name: a.profiles?.name ?? "Unknown",
+        time_secs: a.time_taken_secs, pct: a.percentage, score: a.score,
+      });
+      const fastest = withTime[0] ? mkPerson(withTime[0]) : null;
+      const slowest = withTime.length > 1 ? mkPerson(withTime[withTime.length - 1]) : null;
+
+      const durationSecs = (test.duration_mins || 30) * 60;
+      const suspicious = subAug.filter(a => {
+        if (a.time_taken_secs === null) return false;
+        return a.time_taken_secs < durationSecs * 0.2 || (a.percentage === 100 && a.time_taken_secs < 60);
+      }).map(a => ({
+        id: a.id, name: a.profiles?.name ?? "Unknown",
+        reason: (a.percentage === 100 && a.time_taken_secs < 60)
+          ? "Perfect score in under 1 minute"
+          : `Completed in ${Math.round(a.time_taken_secs / 60)}m (< 20% of allowed time)`,
+        time_secs: a.time_taken_secs, pct: a.percentage,
+      }));
+
+      const enrichedQuestions = questions.map(q => ({
+        id: q.id, question: q.question, type: q.type,
+        marks: q.marks, options: normalizeOptions(q.options),
+        correct_answer: q.correct_answer, order_index: q.order_index,
+        stats: {
+          total:      qStats[q.id]?.total ?? 0,
+          correct:    qStats[q.id]?.correct ?? 0,
+          wrong:      qStats[q.id]?.wrong ?? 0,
+          unanswered: submittedIds.length - (qStats[q.id]?.total ?? 0),
+        },
       }));
 
       return res.json({
         data: {
           test: {
-            id: test.id,
-            title: test.title,
-            type: test.type,
-            duration_mins: test.duration_mins,
-            batch: test.batches || null,
+            id: test.id, title: test.title, type: test.type,
+            duration_mins: test.duration_mins, batch_id: test.batch_id,
+            batch: test.batches || null, institution_name: institutionName,
           },
-          attempts: augmented,
+          summary: {
+            total_enrolled: totalEnrolled,
+            total_attempted: attempts.length,
+            submitted: subAug.length,
+            in_progress: inProgress.length,
+            not_started: totalEnrolled != null ? Math.max(0, totalEnrolled - attempts.length) : null,
+            auto_submitted: autoSubmittedCount,
+            avg_score: avgScore, avg_pct: avgPct,
+            high_score: highScore, low_score: lowScore,
+            pass_count: passCount, fail_count: failCount,
+            pass_rate: passRate, fail_rate: 100 - passRate,
+            avg_time_secs: avgTimeSecs, fastest, slowest, suspicious,
+          },
           questions: enrichedQuestions,
-          max_score: maxScore,
-          total_questions: totalQuestions,
+          max_score: maxScore, total_questions: totalQuestions,
         },
       });
+    } catch (err) {
+      return next(err);
+    }
+  }
+);
+
+// GET /api/tests/:id/analytics/leaderboard — paginated, sorted, filtered attempt list
+router.get(
+  "/:id/analytics/leaderboard",
+  authenticate,
+  requireRole("admin", "faculty", "super-admin"),
+  async (req, res, next) => {
+    try {
+      const testId = req.params.id;
+      const page     = Math.max(1, parseInt(req.query.page)  || 1);
+      const limit    = Math.min(500, Math.max(1, parseInt(req.query.limit) || 50));
+      const search   = (req.query.search || "").toLowerCase().trim();
+      const sortKey  = req.query.sort || "pct";
+      const sortDir  = req.query.dir  === "asc" ? 1 : -1;
+      const filter   = req.query.filter || "submitted";
+      const dateFrom = req.query.from  || null;
+      const dateTo   = req.query.to    || null;
+
+      let testQuery = supabase
+        .from("tests").select("id, batch_id, institution_id").eq("id", testId);
+      if (req.user.role !== "super-admin") testQuery = testQuery.eq("institution_id", req.user.institution_id);
+      const { data: test, error: testErr } = await testQuery.single();
+      if (testErr || !test) return res.status(404).json({ error: "Test not found" });
+
+      const { data: qrows } = await supabase
+        .from("test_questions").select("marks").eq("test_id", testId);
+      const maxScore      = (qrows || []).reduce((s, q) => s + (q.marks || 1), 0);
+      const totalQuestions = (qrows || []).length;
+
+      let rows = [];
+
+      if (filter === "not_attempted") {
+        if (!test.batch_id) return res.json({ data: { attempts: [], total: 0, page, limit, total_pages: 0 } });
+
+        const [{ data: batchStudents }, { data: existing }] = await Promise.all([
+          supabase.from("batch_students")
+            .select("student_id, profiles:student_id ( id, name, email, roll_number )")
+            .eq("batch_id", test.batch_id),
+          supabase.from("test_attempts").select("student_id").eq("test_id", testId),
+        ]);
+        const attemptedIds = new Set((existing || []).map(a => a.student_id));
+        rows = (batchStudents || [])
+          .filter(bs => !attemptedIds.has(bs.student_id))
+          .map(bs => ({
+            id: null, status: "not_attempted", score: null,
+            started_at: null, submitted_at: null, last_answered_at: null, auto_submitted: false,
+            correct: 0, wrong: 0, answered: 0, unanswered: totalQuestions,
+            time_taken_secs: null, percentage: 0, max_score: maxScore,
+            profiles: bs.profiles,
+          }));
+      } else {
+        let q = supabase
+          .from("test_attempts")
+          .select(
+            "id, status, score, started_at, submitted_at, auto_submitted, last_answered_at," +
+            " correct_count, wrong_count, answered_count," +
+            " profiles:student_id ( id, name, email, roll_number )"
+          )
+          .eq("test_id", testId);
+
+        if (["submitted", "passed", "failed"].includes(filter)) q = q.eq("status", "submitted");
+        else if (filter === "in_progress")                       q = q.eq("status", "in_progress");
+
+        if (dateFrom) q = q.gte("submitted_at", dateFrom);
+        if (dateTo)   q = q.lte("submitted_at", dateTo + "T23:59:59.999Z");
+
+        const { data: attempts } = await q;
+        rows = (attempts || []).map(a => {
+          const t = a.submitted_at && a.started_at
+            ? Math.max(0, Math.floor((new Date(a.submitted_at) - new Date(a.started_at)) / 1000))
+            : null;
+          const pct = maxScore > 0 && a.score != null ? Math.round((a.score / maxScore) * 100) : 0;
+          return {
+            ...a,
+            correct: a.correct_count ?? 0, wrong: a.wrong_count ?? 0,
+            answered: a.answered_count ?? 0, unanswered: totalQuestions - (a.answered_count ?? 0),
+            time_taken_secs: t, percentage: pct, max_score: maxScore,
+          };
+        });
+
+        if (filter === "passed") rows = rows.filter(r => r.percentage >= 40);
+        if (filter === "failed") rows = rows.filter(r => r.percentage <  40);
+      }
+
+      // Search filter
+      if (search) {
+        rows = rows.filter(r => {
+          const n = (r.profiles?.name ?? "").toLowerCase();
+          const e = (r.profiles?.email ?? "").toLowerCase();
+          const rn = (r.profiles?.roll_number ?? "").toLowerCase();
+          return n.includes(search) || e.includes(search) || rn.includes(search);
+        });
+      }
+
+      // Sort
+      rows.sort((a, b) => {
+        let av, bv;
+        switch (sortKey) {
+          case "name":       av = (a.profiles?.name ?? "").toLowerCase(); bv = (b.profiles?.name ?? "").toLowerCase(); break;
+          case "roll":       av = a.profiles?.roll_number ?? ""; bv = b.profiles?.roll_number ?? ""; break;
+          case "score":      av = a.score ?? -1;        bv = b.score ?? -1; break;
+          case "pct":        av = a.percentage;          bv = b.percentage;  break;
+          case "correct":    av = a.correct;             bv = b.correct;     break;
+          case "wrong":      av = a.wrong;               bv = b.wrong;       break;
+          case "unanswered": av = a.unanswered;          bv = b.unanswered;  break;
+          case "time":       av = a.time_taken_secs ?? Infinity; bv = b.time_taken_secs ?? Infinity; break;
+          case "submitted":  av = a.submitted_at ?? ""; bv = b.submitted_at ?? ""; break;
+          default:           av = a.percentage; bv = b.percentage;
+        }
+        if (av < bv) return -sortDir;
+        if (av > bv) return  sortDir;
+        return 0;
+      });
+
+      const total = rows.length;
+      const total_pages = Math.ceil(total / limit) || 0;
+      const pageRows = rows.slice((page - 1) * limit, page * limit);
+
+      return res.json({ data: { attempts: pageRows, total, page, limit, total_pages } });
     } catch (err) {
       return next(err);
     }

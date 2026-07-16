@@ -302,8 +302,24 @@ export const deleteTest = (testId: string) =>
 export const getTestAttempts = (testId: string) =>
   apiFetch(`/api/tests/${testId}/attempts`);
 
-export const getTestAnalytics = (testId: string) =>
-  apiFetch(`/api/tests/${testId}/analytics`);
+export const getTestAnalyticsSummary = (testId: string) =>
+  apiFetch(`/api/tests/${testId}/analytics/summary`);
+
+export const getTestLeaderboard = (
+  testId: string,
+  params: {
+    page?: number; limit?: number; search?: string;
+    sort?: string; dir?: string; filter?: string;
+    from?: string; to?: string;
+  } = {}
+) => {
+  const qs = new URLSearchParams(
+    Object.entries(params)
+      .filter(([, v]) => v !== undefined && v !== "")
+      .map(([k, v]) => [k, String(v)])
+  ).toString();
+  return apiFetch(`/api/tests/${testId}/analytics/leaderboard${qs ? `?${qs}` : ""}`);
+};
 
 export const updateTestQuestion = (
   testId: string,
@@ -343,8 +359,11 @@ export const saveAnswer = (
     body: JSON.stringify({ question_id: questionId, answer }),
   });
 
-export const submitAttempt = (attemptId: string) =>
-  apiFetch(`/api/attempts/${attemptId}/submit`, { method: "POST" });
+export const submitAttempt = (attemptId: string, autoSubmitted = false) =>
+  apiFetch(`/api/attempts/${attemptId}/submit`, {
+    method: "POST",
+    body: JSON.stringify({ auto_submitted: autoSubmitted }),
+  });
 
 export const getAttemptResult = (attemptId: string) =>
   apiFetch(`/api/attempts/${attemptId}/result`);

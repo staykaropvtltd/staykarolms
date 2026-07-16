@@ -1,14 +1,16 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   X, ChevronLeft, Download, Printer, FileText, FileSpreadsheet,
   BarChart3, Trophy, Target, Users, Clock, CheckCircle2, XCircle,
   Search, ArrowUp, ArrowDown, ArrowUpDown, Loader2, AlertCircle,
-  TrendingUp, TrendingDown, Minus,
+  TrendingUp, TrendingDown, Minus, Shield, RefreshCw, CalendarRange,
+  Filter, ChevronDown, Zap, Eye,
 } from "lucide-react";
-import { getTestAnalytics, getAttemptResult } from "@/shared/lib/api";
+import { getTestAnalyticsSummary, getTestLeaderboard, getAttemptResult } from "@/shared/lib/api";
+import { useAuth } from "@/shared/context/AuthContext";
 import { toast } from "sonner";
 
-// ────────────────────────────────────────── Types ─────────────────────────────
+// ─────────────────────────────────────────── Types ────────────────────────────
 
 interface ProfileInfo {
   id: string;
@@ -18,11 +20,13 @@ interface ProfileInfo {
 }
 
 interface AttemptRow {
-  id: string;
-  status: string;
+  id: string | null;
+  status: "submitted" | "in_progress" | "not_attempted";
   score: number | null;
-  started_at: string;
+  started_at: string | null;
   submitted_at: string | null;
+  last_answered_at: string | null;
+  auto_submitted: boolean;
   correct: number;
   wrong: number;
   answered: number;
@@ -41,24 +45,85 @@ interface QuestionStat {
   options: string[] | null;
   correct_answer: string | null;
   order_index: number;
-  stats: { total: number; correct: number };
+  stats: { total: number; correct: number; wrong: number; unanswered: number };
 }
 
-interface AnalyticsData {
+interface SuspiciousPerson {
+  id: string;
+  name: string;
+  reason: string;
+  time_secs: number | null;
+  pct: number;
+}
+
+interface PersonStat {
+  id: string;
+  name: string;
+  time_secs: number;
+  pct: number;
+  score: number | null;
+}
+
+interface IntegritySummary {
+  total_enrolled: number | null;
+  total_attempted: number;
+  submitted: number;
+  in_progress: number;
+  not_started: number | null;
+  auto_submitted: number;
+  avg_score: number;
+  avg_pct: number;
+  high_score: number;
+  low_score: number;
+  pass_count: number;
+  fail_count: number;
+  pass_rate: number;
+  fail_rate: number;
+  avg_time_secs: number | null;
+  fastest: PersonStat | null;
+  slowest: PersonStat | null;
+  suspicious: SuspiciousPerson[];
+}
+
+interface AnalyticsSummary {
   test: {
     id: string;
     title: string;
     type: string;
     duration_mins: number;
+    batch_id: string | null;
     batch: { name: string } | null;
+    institution_name: string | null;
   };
-  attempts: AttemptRow[];
+  summary: IntegritySummary;
   questions: QuestionStat[];
   max_score: number;
   total_questions: number;
 }
 
-// ────────────────────────────────────────── Helpers ───────────────────────────
+type FilterKey = "submitted" | "passed" | "failed" | "in_progress" | "not_attempted" | "all";
+type SortKey   = "name" | "roll" | "score" | "pct" | "correct" | "wrong" | "unanswered" | "time" | "submitted";
+type Tab       = "overview" | "leaderboard" | "questions" | "integrity";
+
+interface LbFilters {
+  search: string;
+  filter: FilterKey;
+  sort: SortKey;
+  dir: "asc" | "desc";
+  from: string;
+  to: string;
+}
+
+interface ExportCtx {
+  testTitle: string;
+  batchName: string;
+  institutionName: string;
+  adminName: string;
+  maxScore: number;
+  filters: string;
+}
+
+// ─────────────────────────────────────── Helpers ──────────────────────────────
 
 const PASS_THRESHOLD = 40;
 
@@ -69,7 +134,7 @@ function fmtTime(secs: number | null): string {
   return `${m}m ${s.toString().padStart(2, "0")}s`;
 }
 
-function fmtDate(iso: string | null): string {
+function fmtDate(iso: string | null | undefined): string {
   if (!iso) return "—";
   return new Date(iso).toLocaleString(undefined, {
     day: "2-digit", month: "short", year: "numeric",
@@ -79,183 +144,141 @@ function fmtDate(iso: string | null): string {
 
 function escHtml(s: unknown): string {
   return String(s ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
-type SortKey =
-  | "rank" | "name" | "roll" | "score" | "pct"
-  | "correct" | "wrong" | "unanswered" | "time" | "submitted";
-
-function sortAttempts(
-  list: AttemptRow[],
-  key: SortKey,
-  dir: "asc" | "desc"
-): AttemptRow[] {
-  return [...list].sort((a, b) => {
-    let av: string | number, bv: string | number;
-    switch (key) {
-      case "name":       av = a.profiles?.name?.toLowerCase() ?? ""; bv = b.profiles?.name?.toLowerCase() ?? ""; break;
-      case "roll":       av = a.profiles?.roll_number ?? ""; bv = b.profiles?.roll_number ?? ""; break;
-      case "score":      av = a.score ?? -1; bv = b.score ?? -1; break;
-      case "pct":        av = a.percentage; bv = b.percentage; break;
-      case "correct":    av = a.correct; bv = b.correct; break;
-      case "wrong":      av = a.wrong; bv = b.wrong; break;
-      case "unanswered": av = a.unanswered; bv = b.unanswered; break;
-      case "time":       av = a.time_taken_secs ?? Infinity; bv = b.time_taken_secs ?? Infinity; break;
-      case "submitted":  av = a.submitted_at ?? ""; bv = b.submitted_at ?? ""; break;
-      default:           return 0;
-    }
-    if (av < bv) return dir === "asc" ? -1 : 1;
-    if (av > bv) return dir === "asc" ? 1 : -1;
-    return 0;
-  });
-}
-
-function blobDownload(content: string, filename: string, mime: string) {
-  const blob = new Blob([content], { type: mime });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
 function escCsv(v: unknown): string {
   return `"${String(v ?? "").replace(/"/g, '""')}"`;
 }
 
-function doExportCSV(ranked: AttemptRow[], title: string, batchName: string) {
-  const H = [
-    "Rank", "Student Name", "Roll Number", "Email", "Batch",
-    "Score", "Max Score", "Percentage",
-    "Correct", "Wrong", "Unanswered",
-    "Time Taken", "Submitted At", "Status",
+function blobDownload(content: string, filename: string, mime: string) {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click();
+  document.body.removeChild(a); URL.revokeObjectURL(url);
+}
+
+function metaRows(ctx: ExportCtx): string[][] {
+  return [
+    ["Institution:", ctx.institutionName],
+    ["Test:",        ctx.testTitle],
+    ["Batch:",       ctx.batchName],
+    ["Generated by:", ctx.adminName],
+    ["Generated at:", new Date().toLocaleString()],
+    ["Filters applied:", ctx.filters],
+    [],
   ];
-  const rows = ranked.map((a, i) => [
-    i + 1, a.profiles?.name ?? "", a.profiles?.roll_number ?? "",
-    a.profiles?.email ?? "", batchName,
-    a.score ?? 0, a.max_score, `${a.percentage}%`,
-    a.correct, a.wrong, a.unanswered,
-    fmtTime(a.time_taken_secs),
-    a.submitted_at ? new Date(a.submitted_at).toLocaleString() : "",
-    a.status,
-  ]);
-  const csv = [H, ...rows].map(r => r.map(escCsv).join(",")).join("\r\n");
-  blobDownload("﻿" + csv, `${title}-results.csv`, "text/csv;charset=utf-8;");
+}
+
+// ─────────────────────────────────────── Exports ──────────────────────────────
+
+function doExportCSV(rows: AttemptRow[], ctx: ExportCtx) {
+  const H = ["Rank","Student Name","Roll No","Email","Batch",
+             "Score","Max Score","%","Correct","Wrong","Unanswered","Time","Submitted","Method"];
+  const ranked = [...rows].filter(r => r.status === "submitted")
+    .sort((a, b) => b.percentage - a.percentage);
+  const lines = [
+    ...metaRows(ctx).map(r => r.map(escCsv).join(",")),
+    H.map(escCsv).join(","),
+    ...ranked.map((a, i) => [
+      i + 1, a.profiles?.name ?? "", a.profiles?.roll_number ?? "", a.profiles?.email ?? "",
+      ctx.batchName, a.score ?? 0, ctx.maxScore, `${a.percentage}%`,
+      a.correct, a.wrong, a.unanswered,
+      fmtTime(a.time_taken_secs),
+      a.submitted_at ? new Date(a.submitted_at).toLocaleString() : "",
+      a.auto_submitted ? "Auto" : "Manual",
+    ].map(escCsv).join(",")),
+  ];
+  blobDownload("﻿" + lines.join("\r\n"), `${ctx.testTitle}-results.csv`, "text/csv;charset=utf-8;");
   toast.success("CSV downloaded");
 }
 
-function doExportExcel(ranked: AttemptRow[], title: string, batchName: string) {
-  const H = [
-    "Rank", "Student Name", "Roll Number", "Email", "Batch",
-    "Score", "Max Score", "Percentage",
-    "Correct", "Wrong", "Unanswered", "Time Taken", "Submitted At",
-  ];
-  const rows = ranked.map((a, i) => [
-    i + 1, a.profiles?.name ?? "", a.profiles?.roll_number ?? "",
-    a.profiles?.email ?? "", batchName,
-    a.score ?? 0, a.max_score, `${a.percentage}%`,
+function doExportExcel(rows: AttemptRow[], ctx: ExportCtx) {
+  const H = ["Rank","Student Name","Roll No","Email","Batch",
+             "Score","Max Score","%","Correct","Wrong","Unanswered","Time","Submitted","Method"];
+  const ranked = [...rows].filter(r => r.status === "submitted")
+    .sort((a, b) => b.percentage - a.percentage);
+  const metaHtml = metaRows(ctx)
+    .map(r => r.length ? `<tr>${r.map(c => `<td>${escHtml(c)}</td>`).join("")}</tr>` : "<tr><td></td></tr>")
+    .join("");
+  const tHead = `<tr style="background:#f5f0e8;font-weight:bold">${H.map(h => `<th>${escHtml(h)}</th>`).join("")}</tr>`;
+  const tBody = ranked.map((a, i) => `<tr>${[
+    i+1, a.profiles?.name ?? "", a.profiles?.roll_number ?? "", a.profiles?.email ?? "",
+    ctx.batchName, a.score ?? 0, ctx.maxScore, `${a.percentage}%`,
     a.correct, a.wrong, a.unanswered,
     fmtTime(a.time_taken_secs),
     a.submitted_at ? new Date(a.submitted_at).toLocaleString() : "",
-  ]);
-  const tHead = `<tr style="background:#f5f0e8;font-weight:bold">${H.map(h => `<th>${escHtml(h)}</th>`).join("")}</tr>`;
-  const tBody = rows.map(r => `<tr>${r.map(c => `<td>${escHtml(c)}</td>`).join("")}</tr>`).join("");
-  const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel"><head><meta charset="UTF-8"></head><body><table border="1">${tHead}${tBody}</table></body></html>`;
-  blobDownload(html, `${title}-results.xls`, "application/vnd.ms-excel;charset=utf-8;");
-  toast.success("Excel file downloaded");
+    a.auto_submitted ? "Auto" : "Manual",
+  ].map(c => `<td>${escHtml(c)}</td>`).join("")}</tr>`).join("");
+  const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel"><head><meta charset="UTF-8"></head><body><table border="1">${metaHtml}${tHead}${tBody}</table></body></html>`;
+  blobDownload(html, `${ctx.testTitle}-results.xls`, "application/vnd.ms-excel;charset=utf-8;");
+  toast.success("Excel downloaded");
 }
 
-async function doExportPDF(ranked: AttemptRow[], title: string, batchName: string) {
+async function doExportPDF(rows: AttemptRow[], ctx: ExportCtx) {
   toast.info("Generating PDF…");
   try {
     const { jsPDF } = await import("jspdf");
     const doc = new (jsPDF as any)({ orientation: "landscape", unit: "mm", format: "a4" });
-
     const margin = 12;
-    const pageW: number = doc.internal.pageSize.getWidth();
-    let y = 18;
+    let y = 16;
 
-    doc.setFontSize(13);
-    doc.setTextColor(40);
-    doc.text(`${title} — Leaderboard`, margin, y);
-    y += 6;
-    doc.setFontSize(8);
-    doc.setTextColor(110);
-    doc.text(`Batch: ${batchName}   |   Generated: ${new Date().toLocaleString()}`, margin, y);
-    y += 8;
+    doc.setFontSize(13); doc.setTextColor(40);
+    doc.text(`${ctx.testTitle} — Results`, margin, y); y += 6;
+    doc.setFontSize(7.5); doc.setTextColor(100);
+    doc.text(`Institution: ${ctx.institutionName}   Batch: ${ctx.batchName}   Generated by: ${ctx.adminName}   ${new Date().toLocaleString()}`, margin, y);
+    y += 5;
+    doc.text(`Filters: ${ctx.filters}`, margin, y); y += 7;
 
     const cols = [
-      { label: "Rank",        w: 11 },
-      { label: "Name",        w: 40 },
-      { label: "Roll No",     w: 22 },
-      { label: "Email",       w: 50 },
-      { label: "Score",       w: 18 },
-      { label: "%",           w: 12 },
-      { label: "Correct",     w: 16 },
-      { label: "Wrong",       w: 14 },
-      { label: "Unanswered",  w: 20 },
-      { label: "Time",        w: 20 },
+      { label: "Rank", w: 10 }, { label: "Name", w: 38 }, { label: "Roll", w: 20 },
+      { label: "Email", w: 48 }, { label: "Score", w: 17 }, { label: "%", w: 12 },
+      { label: "Correct", w: 15 }, { label: "Wrong", w: 13 }, { label: "Unans.", w: 16 },
+      { label: "Time", w: 18 }, { label: "Method", w: 15 },
     ];
-    const rowH = 6.5;
+    const rowH = 6;
 
-    // Header
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(7.5);
-    doc.setTextColor(50);
-    doc.setFillColor(245, 240, 232);
-    doc.setDrawColor(210, 200, 185);
+    doc.setFont("helvetica", "bold"); doc.setFontSize(7);
+    doc.setFillColor(245, 240, 232); doc.setDrawColor(210, 200, 185);
     let x = margin;
     cols.forEach(col => {
       doc.rect(x, y, col.w, rowH, "FD");
-      doc.text(col.label, x + 1.5, y + 4.2);
-      x += col.w;
+      doc.text(col.label, x + 1.5, y + 4); x += col.w;
     });
     y += rowH;
 
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(7);
+    doc.setFont("helvetica", "normal"); doc.setFontSize(6.5);
+    const ranked = [...rows].filter(r => r.status === "submitted")
+      .sort((a, b) => b.percentage - a.percentage);
 
     ranked.forEach((a, i) => {
-      if (y + rowH > (doc.internal.pageSize.getHeight() as number) - 14) {
-        doc.addPage();
-        y = 16;
+      if (y + rowH > (doc.internal.pageSize.getHeight() as number) - 12) {
+        doc.addPage(); y = 14;
       }
       const bg = i % 2 === 0 ? [255, 255, 255] : [250, 248, 245];
-      doc.setFillColor(bg[0], bg[1], bg[2]);
-      doc.setDrawColor(225, 218, 208);
+      doc.setFillColor(bg[0], bg[1], bg[2]); doc.setDrawColor(225, 218, 208);
       x = margin;
       const cells = [
-        String(i + 1),
-        (a.profiles?.name ?? "").slice(0, 22),
+        String(i + 1), (a.profiles?.name ?? "").slice(0, 22),
         (a.profiles?.roll_number ?? "—").slice(0, 12),
-        (a.profiles?.email ?? "").slice(0, 28),
-        `${a.score ?? 0}/${a.max_score}`,
-        `${a.percentage}%`,
-        String(a.correct),
-        String(a.wrong),
-        String(a.unanswered),
-        fmtTime(a.time_taken_secs),
+        (a.profiles?.email ?? "").slice(0, 26),
+        `${a.score ?? 0}/${ctx.maxScore}`, `${a.percentage}%`,
+        String(a.correct), String(a.wrong), String(a.unanswered),
+        fmtTime(a.time_taken_secs), a.auto_submitted ? "Auto" : "Manual",
       ];
-      doc.setTextColor(a.percentage >= PASS_THRESHOLD ? 30 : 180, 30, 30);
-      cols.forEach((col, ci) => {
-        doc.rect(x, y, col.w, rowH, "FD");
-        doc.setTextColor(30);
-        if (ci === 5) doc.setTextColor(a.percentage >= PASS_THRESHOLD ? 22 : 200, a.percentage >= PASS_THRESHOLD ? 130 : 30, 22);
-        doc.text(cells[ci], x + 1.5, y + 4.2);
-        doc.setTextColor(30);
-        x += col.w;
+      cells.forEach((cell, ci) => {
+        doc.rect(x, y, cols[ci].w, rowH, "FD");
+        doc.setTextColor(ci === 5 ? (a.percentage >= PASS_THRESHOLD ? 22 : 200) : 30,
+                         ci === 5 ? 130 : 30, 30);
+        doc.text(cell, x + 1.5, y + 3.8);
+        x += cols[ci].w;
       });
       y += rowH;
     });
-
-    doc.save(`${title}-results.pdf`);
+    doc.save(`${ctx.testTitle}-results.pdf`);
     toast.success("PDF downloaded");
   } catch (err) {
     console.error("[PDF export]", err);
@@ -263,57 +286,60 @@ async function doExportPDF(ranked: AttemptRow[], title: string, batchName: strin
   }
 }
 
-function doPrint(ranked: AttemptRow[], title: string, batchName: string, maxScore: number) {
-  const rows = ranked
-    .map(
-      (a, i) => `<tr>
-      <td>${i + 1}</td>
-      <td>${escHtml(a.profiles?.name)}</td>
-      <td>${escHtml(a.profiles?.roll_number ?? "—")}</td>
-      <td>${escHtml(a.profiles?.email)}</td>
-      <td>${escHtml(batchName)}</td>
-      <td>${a.score ?? 0}/${maxScore}</td>
-      <td style="color:${a.percentage >= PASS_THRESHOLD ? "#16a34a" : "#dc2626"}">${a.percentage}%</td>
-      <td>${a.correct}</td><td>${a.wrong}</td><td>${a.unanswered}</td>
-      <td>${fmtTime(a.time_taken_secs)}</td>
-      <td>${escHtml(a.submitted_at ? new Date(a.submitted_at).toLocaleString() : "—")}</td>
-    </tr>`
-    )
-    .join("");
+function doPrint(rows: AttemptRow[], ctx: ExportCtx) {
+  const ranked = [...rows].filter(r => r.status === "submitted")
+    .sort((a, b) => b.percentage - a.percentage);
+  const trs = ranked.map((a, i) => `<tr>
+    <td>${i+1}</td><td>${escHtml(a.profiles?.name)}</td>
+    <td>${escHtml(a.profiles?.roll_number ?? "—")}</td>
+    <td>${escHtml(a.profiles?.email)}</td>
+    <td>${escHtml(ctx.batchName)}</td>
+    <td>${a.score ?? 0}/${ctx.maxScore}</td>
+    <td style="color:${a.percentage >= PASS_THRESHOLD ? "#16a34a" : "#dc2626"}">${a.percentage}%</td>
+    <td>${a.correct}</td><td>${a.wrong}</td><td>${a.unanswered}</td>
+    <td>${fmtTime(a.time_taken_secs)}</td>
+    <td>${escHtml(a.submitted_at ? new Date(a.submitted_at).toLocaleString() : "—")}</td>
+    <td>${a.auto_submitted ? "Auto" : "Manual"}</td>
+  </tr>`).join("");
 
-  const html = `<!DOCTYPE html><html><head><title>${escHtml(title)} — Results</title>
+  const html = `<!DOCTYPE html><html><head><title>${escHtml(ctx.testTitle)} — Results</title>
 <style>
-  body{font-family:Arial,sans-serif;font-size:11px;margin:18px}
-  h1{font-size:15px;margin:0 0 3px}p.sub{color:#666;margin:0 0 14px;font-size:10px}
+  body{font-family:Arial,sans-serif;font-size:10px;margin:18px}
+  .meta{margin-bottom:10px;color:#555;font-size:10px}
+  .meta strong{color:#222}
+  h1{font-size:14px;margin:0 0 6px}
   table{width:100%;border-collapse:collapse}
-  th{background:#f5f0e8;font-weight:700;padding:6px 7px;border:1px solid #ccc;text-align:left;font-size:10px}
-  td{padding:5px 7px;border:1px solid #e5e5e5}
+  th{background:#f5f0e8;font-weight:700;padding:5px 6px;border:1px solid #ccc;text-align:left}
+  td{padding:4px 6px;border:1px solid #e5e5e5}
   tr:nth-child(even) td{background:#faf9f7}
-  @media print{@page{margin:12mm}button{display:none}}
+  @media print{@page{margin:10mm}button{display:none}}
 </style></head><body>
-<h1>${escHtml(title)} — Leaderboard</h1>
-<p class="sub">Batch: ${escHtml(batchName)} &nbsp;|&nbsp; Printed: ${new Date().toLocaleString()}</p>
+<h1>${escHtml(ctx.testTitle)} — Results</h1>
+<div class="meta">
+  <strong>Institution:</strong> ${escHtml(ctx.institutionName)} &nbsp;|&nbsp;
+  <strong>Batch:</strong> ${escHtml(ctx.batchName)} &nbsp;|&nbsp;
+  <strong>Generated by:</strong> ${escHtml(ctx.adminName)} &nbsp;|&nbsp;
+  ${new Date().toLocaleString()}<br/>
+  <strong>Filters:</strong> ${escHtml(ctx.filters)}
+</div>
 <table><thead><tr>
-  <th>Rank</th><th>Name</th><th>Roll No</th><th>Email</th><th>Batch</th>
-  <th>Score</th><th>%</th><th>Correct</th><th>Wrong</th><th>Unanswered</th>
-  <th>Time</th><th>Submitted</th>
-</tr></thead><tbody>${rows}</tbody></table>
+  <th>Rank</th><th>Name</th><th>Roll</th><th>Email</th><th>Batch</th>
+  <th>Score</th><th>%</th><th>Correct</th><th>Wrong</th><th>Unans.</th>
+  <th>Time</th><th>Submitted</th><th>Method</th>
+</tr></thead><tbody>${trs}</tbody></table>
 <br><button onclick="window.print()">Print</button>
 </body></html>`;
 
   const win = window.open("", "_blank", "width=1200,height=800");
   if (!win) { toast.error("Allow pop-ups to use Print"); return; }
-  win.document.write(html);
-  win.document.close();
+  win.document.write(html); win.document.close();
   win.onload = () => { win.focus(); win.print(); };
 }
 
-// ────────────────────────────────── AttemptDetailView ────────────────────────
+// ─────────────────────────────── AttemptDetailView ────────────────────────────
 
 function AttemptDetailView({
-  attempt,
-  onBack,
-  onClose,
+  attempt, onBack, onClose,
 }: {
   attempt: AttemptRow;
   onBack: () => void;
@@ -324,42 +350,31 @@ function AttemptDetailView({
 
   useEffect(() => {
     setLoading(true);
-    getAttemptResult(attempt.id).then(({ data }) => {
-      setDetail(data);
-      setLoading(false);
+    getAttemptResult(attempt.id!).then(({ data }) => {
+      setDetail(data); setLoading(false);
     });
   }, [attempt.id]);
 
   const answers: any[] = detail?.test_answers ?? [];
   const totalPossible = answers.reduce((s: number, a: any) => s + (a.test_questions?.marks ?? 0), 0);
-  const score = detail?.score ?? 0;
-  const pct = totalPossible > 0 ? Math.round((score / totalPossible) * 100) : 0;
-  const correctCount = answers.filter((a: any) => a.is_correct).length;
-  const wrongCount   = answers.filter((a: any) => !a.is_correct && (a.answer != null && a.answer !== "")).length;
-  const unanswered   = answers.filter((a: any) => a.answer == null || a.answer === "").length;
-
-  const resolveOpt = (opts: string[] | null, idx: string | null) => {
-    if (!Array.isArray(opts) || idx == null || idx === "") return null;
-    const i = parseInt(idx);
-    if (isNaN(i) || i < 0 || i >= opts.length) return null;
-    return { letter: String.fromCharCode(65 + i), text: opts[i] };
-  };
+  const score       = detail?.score ?? 0;
+  const pct         = totalPossible > 0 ? Math.round((score / totalPossible) * 100) : 0;
+  const correctCnt  = answers.filter((a: any) => a.is_correct).length;
+  const wrongCnt    = answers.filter((a: any) => !a.is_correct && (a.answer != null && a.answer !== "")).length;
+  const unansCnt    = answers.filter((a: any) => a.answer == null || a.answer === "").length;
 
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
       <div className="flex items-center gap-3 px-5 py-4 border-b border-border shrink-0">
-        <button onClick={onBack} title="Back to leaderboard"
-          className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground transition-colors shrink-0">
+        <button onClick={onBack} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground shrink-0">
           <ChevronLeft className="w-5 h-5" />
         </button>
         <div className="flex-1 min-w-0">
           <p className="font-bold text-base truncate">{attempt.profiles?.name ?? "Unknown"}</p>
           <p className="text-xs text-muted-foreground truncate">
             {attempt.profiles?.email}
-            {attempt.profiles?.roll_number && (
-              <span className="ml-2 opacity-60">· Roll: {attempt.profiles.roll_number}</span>
-            )}
+            {attempt.profiles?.roll_number && <span className="ml-2 opacity-60">· Roll: {attempt.profiles.roll_number}</span>}
           </p>
         </div>
         <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground shrink-0">
@@ -369,24 +384,22 @@ function AttemptDetailView({
 
       {loading ? (
         <div className="flex-1 flex items-center justify-center gap-3 text-muted-foreground">
-          <Loader2 className="w-5 h-5 animate-spin" />
-          <span>Loading attempt…</span>
+          <Loader2 className="w-5 h-5 animate-spin" /><span>Loading attempt…</span>
         </div>
       ) : !detail ? (
         <div className="flex-1 flex flex-col items-center justify-center gap-3 text-muted-foreground">
-          <AlertCircle className="w-10 h-10 opacity-30" />
-          <p>Could not load attempt details.</p>
+          <AlertCircle className="w-10 h-10 opacity-30" /><p>Could not load attempt details.</p>
         </div>
       ) : (
         <>
           {/* Score strip */}
           <div className="grid grid-cols-5 border-b border-border shrink-0">
             {[
-              { label: "Score",       value: `${score}/${totalPossible}`, cls: "text-foreground" },
-              { label: "Percentage",  value: `${pct}%`,  cls: pct >= PASS_THRESHOLD ? "text-green-500" : "text-red-500" },
-              { label: "Correct",     value: correctCount, cls: "text-green-500" },
-              { label: "Wrong",       value: wrongCount,   cls: "text-red-500" },
-              { label: "Unanswered",  value: unanswered,   cls: "text-muted-foreground" },
+              { label: "Score",      value: `${score}/${totalPossible}`, cls: "text-foreground" },
+              { label: "Percentage", value: `${pct}%`, cls: pct >= PASS_THRESHOLD ? "text-green-500" : "text-red-500" },
+              { label: "Correct",    value: correctCnt, cls: "text-green-500" },
+              { label: "Wrong",      value: wrongCnt,   cls: "text-red-500" },
+              { label: "Unanswered", value: unansCnt,   cls: "text-muted-foreground" },
             ].map(({ label, value, cls }) => (
               <div key={label} className="text-center py-4 border-r border-border last:border-r-0">
                 <p className={`text-xl font-bold ${cls}`}>{value}</p>
@@ -395,13 +408,26 @@ function AttemptDetailView({
             ))}
           </div>
 
-          {/* Sub-header meta */}
-          <div className="flex items-center gap-4 px-5 py-2 border-b border-border bg-muted/20 text-xs text-muted-foreground shrink-0">
-            <span>Time: <strong>{fmtTime(attempt.time_taken_secs)}</strong></span>
-            <span>Submitted: <strong>{fmtDate(attempt.submitted_at)}</strong></span>
-            <span className={`ml-auto font-bold ${pct >= PASS_THRESHOLD ? "text-green-600" : "text-red-500"}`}>
-              {pct >= PASS_THRESHOLD ? "PASSED" : "FAILED"}
-            </span>
+          {/* Timeline */}
+          <div className="grid grid-cols-5 border-b border-border bg-muted/20 shrink-0">
+            {[
+              { label: "Started At",      value: fmtDate(attempt.started_at) },
+              { label: "Last Answer",     value: fmtDate(attempt.last_answered_at) },
+              { label: "Submitted At",    value: fmtDate(attempt.submitted_at) },
+              { label: "Total Duration",  value: fmtTime(attempt.time_taken_secs) },
+              { label: "Submission",      value: attempt.auto_submitted ? "Auto" : "Manual",
+                cls: attempt.auto_submitted ? "text-yellow-600 font-bold" : "text-green-600 font-bold" },
+            ].map(({ label, value, cls }) => (
+              <div key={label} className="text-center px-2 py-2.5 border-r border-border last:border-r-0">
+                <p className={`text-xs font-semibold ${(cls as string | undefined) ?? "text-foreground"}`}>{value}</p>
+                <p className="text-[10px] text-muted-foreground mt-0.5">{label}</p>
+              </div>
+            ))}
+          </div>
+
+          {/* Pass/fail banner */}
+          <div className={`px-5 py-1.5 text-xs font-bold text-right shrink-0 ${pct >= PASS_THRESHOLD ? "bg-green-500/5 text-green-600" : "bg-red-500/5 text-red-500"}`}>
+            {pct >= PASS_THRESHOLD ? "PASSED" : "FAILED"}
           </div>
 
           {/* Questions */}
@@ -409,34 +435,29 @@ function AttemptDetailView({
             {answers.length === 0 && (
               <div className="text-center py-12 text-muted-foreground">
                 <AlertCircle className="w-8 h-8 mx-auto mb-2 opacity-30" />
-                <p>No answers were recorded for this attempt.</p>
+                <p>No answers recorded for this attempt.</p>
               </div>
             )}
             {answers.map((ans: any, i: number) => {
               const q = ans.test_questions;
               if (!q) return null;
               const opts: string[] = Array.isArray(q.options) ? q.options : [];
-              const isMcq = q.type === "mcq";
+              const isMcq      = q.type === "mcq";
               const studentIdx = (ans.answer != null && ans.answer !== "") ? parseInt(ans.answer) : null;
-              const correctIdx  = q.correct_answer != null ? parseInt(q.correct_answer) : null;
-              const isCorrect   = ans.is_correct;
-              const hasAnswer   = ans.answer != null && ans.answer !== "";
-              const marksAwarded = ans.marks_awarded ?? 0;
+              const correctIdx = q.correct_answer != null ? parseInt(q.correct_answer) : null;
+              const isCorrect  = ans.is_correct;
+              const hasAnswer  = ans.answer != null && ans.answer !== "";
+              const awarded    = ans.marks_awarded ?? 0;
 
               return (
                 <div key={ans.id} className={`border rounded-xl overflow-hidden ${
-                  isCorrect  ? "border-green-500/25" :
-                  hasAnswer  ? "border-red-400/25" :
-                               "border-border"
+                  isCorrect ? "border-green-500/25" : hasAnswer ? "border-red-400/25" : "border-border"
                 }`}>
-                  {/* Row header */}
                   <div className={`flex items-center justify-between gap-4 px-4 py-3 ${
                     isCorrect ? "bg-green-500/5" : hasAnswer ? "bg-red-500/5" : "bg-muted/20"
                   }`}>
                     <div className="flex items-center gap-2.5">
-                      <span className="w-7 h-7 rounded-lg bg-muted flex items-center justify-center text-xs font-black text-muted-foreground shrink-0">
-                        {i + 1}
-                      </span>
+                      <span className="w-7 h-7 rounded-lg bg-muted flex items-center justify-center text-xs font-black text-muted-foreground shrink-0">{i + 1}</span>
                       <span className={`text-xs font-bold uppercase px-2 py-0.5 rounded-full ${
                         q.type === "mcq"    ? "bg-blue-500/10 text-blue-600" :
                         q.type === "coding" ? "bg-purple-500/10 text-purple-600" :
@@ -455,62 +476,48 @@ function AttemptDetailView({
                         {isCorrect ? "Correct" : hasAnswer ? "Wrong" : "Unanswered"}
                       </span>
                       <span className={`text-sm font-bold ${isCorrect ? "text-green-600" : "text-muted-foreground"}`}>
-                        {marksAwarded}/{q.marks}
+                        {awarded}/{q.marks}
                       </span>
                     </div>
                   </div>
-
-                  {/* Question text */}
                   <p className="px-4 py-3 text-sm font-medium text-foreground leading-snug">{q.question}</p>
 
-                  {/* MCQ — all options */}
                   {isMcq && opts.length > 0 && (
                     <div className="px-4 pb-4 grid sm:grid-cols-2 gap-2">
                       {opts.map((opt, idx) => {
                         const isStu = studentIdx === idx;
                         const isCor = correctIdx === idx;
-                        let cardCls = "border-border bg-muted/20 text-muted-foreground";
-                        if (isCor && isStu)       cardCls = "border-green-500/60 bg-green-500/10 text-green-700";
-                        else if (isCor)            cardCls = "border-green-400/40 bg-green-500/5 text-green-700";
-                        else if (isStu && !isCorrect) cardCls = "border-red-400/40 bg-red-500/5 text-red-600";
+                        let cls = "border-border bg-muted/20 text-muted-foreground";
+                        if (isCor && isStu)          cls = "border-green-500/60 bg-green-500/10 text-green-700";
+                        else if (isCor)              cls = "border-green-400/40 bg-green-500/5 text-green-700";
+                        else if (isStu && !isCorrect) cls = "border-red-400/40 bg-red-500/5 text-red-600";
                         return (
-                          <div key={idx} className={`flex items-center gap-2.5 px-3 py-2.5 rounded-lg border-2 text-sm ${cardCls}`}>
+                          <div key={idx} className={`flex items-center gap-2.5 px-3 py-2.5 rounded-lg border-2 text-sm ${cls}`}>
                             <span className={`w-5 h-5 rounded-md shrink-0 text-xs font-black flex items-center justify-center ${
-                              isCor                     ? "bg-green-500 text-white" :
-                              (isStu && !isCorrect)     ? "bg-red-400 text-white" :
-                                                          "bg-muted-foreground/20 text-muted-foreground"
-                            }`}>
-                              {String.fromCharCode(65 + idx)}
-                            </span>
+                              isCor ? "bg-green-500 text-white" :
+                              (isStu && !isCorrect) ? "bg-red-400 text-white" :
+                              "bg-muted-foreground/20 text-muted-foreground"
+                            }`}>{String.fromCharCode(65 + idx)}</span>
                             <span className="flex-1 leading-snug">{opt}</span>
-                            {isStu && !isCor && (
-                              <span className="text-xs font-semibold text-red-500 shrink-0">← You</span>
-                            )}
-                            {isCor && isStu && (
-                              <span className="text-xs font-semibold text-green-600 shrink-0">✓ You</span>
-                            )}
-                            {isCor && !isStu && (
-                              <span className="text-xs font-semibold text-green-600 shrink-0">✓ Correct</span>
-                            )}
+                            {isStu && !isCor && <span className="text-xs font-semibold text-red-500 shrink-0">← You</span>}
+                            {isCor && isStu  && <span className="text-xs font-semibold text-green-600 shrink-0">✓ You</span>}
+                            {isCor && !isStu && <span className="text-xs font-semibold text-green-600 shrink-0">✓ Correct</span>}
                           </div>
                         );
                       })}
                     </div>
                   )}
 
-                  {/* Text answer */}
                   {!isMcq && (
                     <div className="px-4 pb-4 grid sm:grid-cols-2 gap-3">
                       <div className={`rounded-lg p-3 border ${
-                        isCorrect   ? "border-green-500/30 bg-green-500/5" :
-                        hasAnswer   ? "border-red-400/30 bg-red-500/5" :
-                                      "border-border bg-muted/20"
+                        isCorrect  ? "border-green-500/30 bg-green-500/5" :
+                        hasAnswer  ? "border-red-400/30 bg-red-500/5" :
+                                     "border-border bg-muted/20"
                       }`}>
                         <p className="text-xs font-bold text-muted-foreground mb-1">Student's Answer</p>
                         <p className={`text-sm font-medium whitespace-pre-wrap ${
-                          isCorrect  ? "text-green-700" :
-                          hasAnswer  ? "text-red-600" :
-                                       "text-muted-foreground italic"
+                          isCorrect ? "text-green-700" : hasAnswer ? "text-red-600" : "text-muted-foreground italic"
                         }`}>{ans.answer || "No answer"}</p>
                       </div>
                       {q.correct_answer && (
@@ -531,46 +538,37 @@ function AttemptDetailView({
   );
 }
 
-// ────────────────────────────────────── OverviewTab ──────────────────────────
+// ─────────────────────────────────── OverviewTab ──────────────────────────────
 
-function OverviewTab({ data }: { data: AnalyticsData }) {
-  const submitted   = data.attempts.filter(a => a.status === "submitted");
-  const inProgress  = data.attempts.filter(a => a.status !== "submitted");
-
-  if (submitted.length === 0) {
+function OverviewTab({ summary, maxScore, totalQuestions, durationMins }: {
+  summary: IntegritySummary;
+  maxScore: number;
+  totalQuestions: number;
+  durationMins: number;
+}) {
+  if (summary.submitted === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-24 text-muted-foreground">
         <Users className="w-12 h-12 opacity-20 mb-3" />
         <p className="font-medium">No submitted attempts yet</p>
-        <p className="text-sm mt-1">Stats will appear once students complete the test.</p>
+        <p className="text-sm mt-1">Stats will appear once students submit.</p>
       </div>
     );
   }
 
-  const scores    = submitted.map(a => a.score ?? 0);
-  const avgScore  = Math.round(scores.reduce((s, v) => s + v, 0) / scores.length);
-  const highScore = Math.max(...scores);
-  const lowScore  = Math.min(...scores);
-  const avgPct    = Math.round(submitted.reduce((s, a) => s + a.percentage, 0) / submitted.length);
-  const passCount = submitted.filter(a => a.percentage >= PASS_THRESHOLD).length;
-  const failCount = submitted.length - passCount;
-  const passRate  = Math.round((passCount / submitted.length) * 100);
-  const failRate  = 100 - passRate;
-  const timeSamples = submitted.filter(a => a.time_taken_secs != null).map(a => a.time_taken_secs!);
-  const avgTime   = timeSamples.length
-    ? Math.round(timeSamples.reduce((s, v) => s + v, 0) / timeSamples.length)
-    : null;
-
   const cards = [
-    { label: "Total Attempts",   value: data.attempts.length,           sub: `${submitted.length} submitted · ${inProgress.length} in progress`,              icon: Users,         cls: "text-foreground" },
-    { label: "Avg Score",        value: `${avgScore}/${data.max_score}`, sub: `${avgPct}% average`,                                                            icon: Target,        cls: "text-[var(--gold)]" },
-    { label: "Highest Score",    value: `${highScore}/${data.max_score}`,sub: `${Math.round((highScore / Math.max(data.max_score, 1)) * 100)}%`,                icon: TrendingUp,    cls: "text-green-500" },
-    { label: "Lowest Score",     value: `${lowScore}/${data.max_score}`, sub: `${Math.round((lowScore / Math.max(data.max_score, 1)) * 100)}%`,                 icon: TrendingDown,  cls: "text-red-500" },
-    { label: "Pass Rate",        value: `${passRate}%`,                  sub: `${passCount} passed (≥${PASS_THRESHOLD}%)`,                                     icon: CheckCircle2,  cls: "text-green-500" },
-    { label: "Fail Rate",        value: `${failRate}%`,                  sub: `${failCount} failed`,                                                            icon: XCircle,       cls: "text-red-500" },
-    { label: "Avg Completion",   value: fmtTime(avgTime),                sub: `of ${data.test.duration_mins} min allowed`,                                      icon: Clock,         cls: "text-blue-500" },
-    { label: "Total Questions",  value: data.total_questions,            sub: `${data.max_score} total marks`,                                                   icon: BarChart3,     cls: "text-muted-foreground" },
+    { label: "Total Attempts",  value: summary.total_attempted,            sub: `${summary.submitted} submitted · ${summary.in_progress} in progress`, icon: Users,        cls: "text-foreground" },
+    { label: "Avg Score",       value: `${summary.avg_score}/${maxScore}`, sub: `${summary.avg_pct}% average`,                                          icon: Target,       cls: "text-[var(--gold)]" },
+    { label: "Highest Score",   value: `${summary.high_score}/${maxScore}`,sub: `${Math.round((summary.high_score / Math.max(maxScore,1)) * 100)}%`,     icon: TrendingUp,   cls: "text-green-500" },
+    { label: "Lowest Score",    value: `${summary.low_score}/${maxScore}`, sub: `${Math.round((summary.low_score / Math.max(maxScore,1)) * 100)}%`,      icon: TrendingDown, cls: "text-red-500" },
+    { label: "Pass Rate",       value: `${summary.pass_rate}%`,            sub: `${summary.pass_count} passed (≥${PASS_THRESHOLD}%)`,                    icon: CheckCircle2, cls: "text-green-500" },
+    { label: "Fail Rate",       value: `${summary.fail_rate}%`,            sub: `${summary.fail_count} failed`,                                          icon: XCircle,      cls: "text-red-500" },
+    { label: "Avg Completion",  value: fmtTime(summary.avg_time_secs),     sub: `of ${durationMins} min allowed`,                                        icon: Clock,        cls: "text-blue-500" },
+    { label: "Total Questions", value: totalQuestions,                     sub: `${maxScore} total marks`,                                               icon: BarChart3,    cls: "text-muted-foreground" },
   ];
+
+  const passRate = summary.pass_rate;
+  const failRate = summary.fail_rate;
 
   return (
     <div className="p-6 space-y-6">
@@ -587,253 +585,306 @@ function OverviewTab({ data }: { data: AnalyticsData }) {
         ))}
       </div>
 
-      {/* Pass / Fail bar */}
+      {/* Pass/fail bar */}
       <div className="bg-card border border-border rounded-xl p-5">
         <h4 className="text-sm font-semibold mb-4">Pass vs Fail Distribution</h4>
         <div className="flex h-7 rounded-full overflow-hidden gap-px bg-muted">
-          <div
-            className="bg-green-500 flex items-center justify-center text-xs font-bold text-white transition-all"
-            style={{ width: `${passRate}%` }}
-          >
+          <div className="bg-green-500 flex items-center justify-center text-xs font-bold text-white transition-all"
+               style={{ width: `${passRate}%` }}>
             {passRate >= 12 && `${passRate}% Pass`}
           </div>
-          <div
-            className="bg-red-400 flex items-center justify-center text-xs font-bold text-white transition-all"
-            style={{ width: `${failRate}%` }}
-          >
+          <div className="bg-red-400 flex items-center justify-center text-xs font-bold text-white transition-all"
+               style={{ width: `${failRate}%` }}>
             {failRate >= 12 && `${failRate}% Fail`}
           </div>
         </div>
         <div className="flex items-center gap-6 mt-3 text-sm text-muted-foreground">
-          <span className="flex items-center gap-1.5">
-            <span className="w-2.5 h-2.5 rounded-full bg-green-500" />
-            Pass ≥ {PASS_THRESHOLD}%: <strong className="text-foreground">{passCount}</strong>
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="w-2.5 h-2.5 rounded-full bg-red-400" />
-            Fail: <strong className="text-foreground">{failCount}</strong>
-          </span>
+          <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-green-500" />Pass ≥{PASS_THRESHOLD}%: <strong className="text-foreground">{summary.pass_count}</strong></span>
+          <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-red-400" />Fail: <strong className="text-foreground">{summary.fail_count}</strong></span>
         </div>
       </div>
     </div>
   );
 }
 
-// ────────────────────────────────── LeaderboardTab ───────────────────────────
+// ─────────────────────────────────── LeaderboardTab ──────────────────────────
 
 function LeaderboardTab({
-  data,
-  onSelectAttempt,
+  testId, hasBatch, batchName, maxScore, totalQuestions,
+  exportCtx, onSelectAttempt,
 }: {
-  data: AnalyticsData;
+  testId: string;
+  hasBatch: boolean;
+  batchName: string;
+  maxScore: number;
+  totalQuestions: number;
+  exportCtx: ExportCtx;
   onSelectAttempt: (a: AttemptRow) => void;
 }) {
-  const [search,  setSearch]  = useState("");
-  const [sortKey, setSortKey] = useState<SortKey>("pct");
-  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  const [filters, setFilters] = useState<LbFilters>({
+    search: "", filter: "submitted", sort: "pct", dir: "desc", from: "", to: "",
+  });
+  const [attempts, setAttempts]     = useState<AttemptRow[]>([]);
+  const [total,    setTotal]        = useState(0);
+  const [page,     setPage]         = useState(1);
+  const [totalPages, setTotalPages] = useState(0);
+  const [loading,  setLoading]      = useState(false);
+  const [loadMore, setLoadMore]     = useState(false);
+  const [error,    setError]        = useState<string | null>(null);
+  const [initialized, setInit]      = useState(false);
 
-  const batchName = data.test.batch?.name ?? "All Batches";
-  const submitted = data.attempts.filter(a => a.status === "submitted");
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Canonical rank order = score desc
-  const ranked = sortAttempts(submitted, "pct", "desc");
+  const load = useCallback(async (pg: number, append: boolean, f: LbFilters) => {
+    if (append) setLoadMore(true); else setLoading(true);
+    setError(null);
+    const { data, error: e } = await getTestLeaderboard(testId, {
+      page: pg, limit: 50,
+      search: f.search, sort: f.sort, dir: f.dir,
+      filter: f.filter, from: f.from, to: f.to,
+    });
+    if (e || !data) {
+      setError(e ?? "Failed to load leaderboard");
+    } else {
+      setAttempts(prev => append ? [...prev, ...data.attempts] : data.attempts);
+      setTotal(data.total);
+      setTotalPages(data.total_pages);
+      setPage(pg);
+    }
+    if (append) setLoadMore(false); else setLoading(false);
+    setInit(true);
+  }, [testId]);
+
+  // Load when tab mounts
+  useEffect(() => { load(1, false, filters); }, []);
+
+  const applyFilters = (next: LbFilters) => {
+    setFilters(next);
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    searchTimer.current = setTimeout(() => load(1, false, next), 300);
+  };
+
+  const ranked = [...attempts].filter(r => r.status === "submitted")
+    .sort((a, b) => b.percentage - a.percentage);
   const rankMap = new Map(ranked.map((a, i) => [a.id, i + 1]));
 
-  // User-driven sort + search
-  const filtered = sortAttempts(
-    submitted.filter(a => {
-      if (!search) return true;
-      const q = search.toLowerCase();
-      return (
-        a.profiles?.name?.toLowerCase().includes(q) ||
-        a.profiles?.email?.toLowerCase().includes(q) ||
-        (a.profiles?.roll_number ?? "").toLowerCase().includes(q)
-      );
-    }),
-    sortKey,
-    sortDir
-  );
+  const FILTER_OPTIONS: { key: FilterKey; label: string }[] = [
+    { key: "submitted",      label: "Submitted" },
+    { key: "passed",         label: "Passed" },
+    { key: "failed",         label: "Failed" },
+    { key: "in_progress",    label: "In Progress" },
+    ...(hasBatch ? [{ key: "not_attempted" as FilterKey, label: "Not Attempted" }] : []),
+    { key: "all",            label: "All" },
+  ];
 
-  const inProgress = data.attempts.filter(a => a.status !== "submitted");
+  const filterLabel = FILTER_OPTIONS.find(f => f.key === filters.filter)?.label ?? "All";
+  const activeFilters = [
+    filters.filter !== "submitted" && filterLabel,
+    filters.from && `From ${filters.from}`,
+    filters.to   && `To ${filters.to}`,
+  ].filter(Boolean).join(", ") || "Submitted";
 
   const handleSort = (k: SortKey) => {
-    if (k === sortKey) setSortDir(d => d === "asc" ? "desc" : "asc");
-    else { setSortKey(k); setSortDir("desc"); }
+    const next = {
+      ...filters,
+      sort: k,
+      dir: (k === filters.sort && filters.dir === "desc" ? "asc" : "desc") as "asc" | "desc",
+    };
+    applyFilters(next);
   };
 
   const SIcon = ({ k }: { k: SortKey }) =>
-    k !== sortKey
+    k !== filters.sort
       ? <ArrowUpDown className="w-3 h-3 opacity-30" />
-      : sortDir === "asc"
+      : filters.dir === "asc"
         ? <ArrowUp className="w-3 h-3 text-primary" />
         : <ArrowDown className="w-3 h-3 text-primary" />;
 
-  const TH = ({
-    label, k, className = "",
-  }: { label: string; k: SortKey; className?: string }) => (
-    <th
-      onClick={() => handleSort(k)}
-      className={`px-3 py-3 text-left text-xs font-semibold text-muted-foreground cursor-pointer select-none hover:text-foreground whitespace-nowrap transition-colors ${className}`}
-    >
+  const TH = ({ label, k }: { label: string; k: SortKey }) => (
+    <th onClick={() => handleSort(k)}
+        className="px-3 py-3 text-left text-xs font-semibold text-muted-foreground cursor-pointer select-none hover:text-foreground whitespace-nowrap transition-colors">
       <span className="flex items-center gap-1">{label}<SIcon k={k} /></span>
     </th>
   );
 
-  if (submitted.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center py-24 text-muted-foreground">
-        <Trophy className="w-12 h-12 opacity-20 mb-3" />
-        <p className="font-medium">No submitted attempts yet</p>
-        <p className="text-sm mt-1">The leaderboard will appear once students submit.</p>
-      </div>
-    );
-  }
-
   return (
     <div className="flex flex-col h-full">
       {/* Toolbar */}
-      <div className="px-4 py-3 border-b border-border flex flex-wrap items-center gap-3 shrink-0 bg-card">
-        <div className="relative flex-1 min-w-48">
+      <div className="px-4 py-3 border-b border-border flex flex-wrap items-center gap-2 shrink-0 bg-card">
+        {/* Search */}
+        <div className="relative min-w-44 flex-1 max-w-64">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-          <input
-            type="text"
-            placeholder="Search name, roll no, email…"
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            className="w-full pl-8 pr-3 py-1.5 text-sm bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20"
-          />
+          <input type="text" placeholder="Name, roll, email…" value={filters.search}
+            onChange={e => applyFilters({ ...filters, search: e.target.value })}
+            className="w-full pl-8 pr-3 py-1.5 text-sm bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20" />
         </div>
-        <span className="text-xs text-muted-foreground shrink-0">
-          {filtered.length}/{submitted.length} shown
-        </span>
+
+        {/* Status filter */}
+        <div className="relative">
+          <select value={filters.filter}
+            onChange={e => applyFilters({ ...filters, filter: e.target.value as FilterKey })}
+            className="appearance-none pl-3 pr-7 py-1.5 text-sm bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/20 cursor-pointer">
+            {FILTER_OPTIONS.map(o => <option key={o.key} value={o.key}>{o.label}</option>)}
+          </select>
+          <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
+        </div>
+
+        {/* Date range */}
+        <div className="flex items-center gap-1.5">
+          <CalendarRange className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+          <input type="date" value={filters.from}
+            onChange={e => applyFilters({ ...filters, from: e.target.value })}
+            className="text-xs border border-border rounded-lg px-2 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-primary/20" />
+          <span className="text-xs text-muted-foreground">–</span>
+          <input type="date" value={filters.to}
+            onChange={e => applyFilters({ ...filters, to: e.target.value })}
+            className="text-xs border border-border rounded-lg px-2 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-primary/20" />
+          {(filters.from || filters.to) && (
+            <button onClick={() => applyFilters({ ...filters, from: "", to: "" })}
+              className="text-xs text-muted-foreground hover:text-foreground px-1">✕</button>
+          )}
+        </div>
+
+        <span className="text-xs text-muted-foreground shrink-0">{total} result{total !== 1 ? "s" : ""}</span>
+
+        {/* Export */}
         <div className="flex items-center gap-1.5 ml-auto">
           {([
-            { label: "CSV",   icon: FileText,        action: () => doExportCSV(ranked, data.test.title, batchName) },
-            { label: "Excel", icon: FileSpreadsheet,  action: () => doExportExcel(ranked, data.test.title, batchName) },
-            { label: "PDF",   icon: Download,        action: () => doExportPDF(ranked, data.test.title, batchName) },
-            { label: "Print", icon: Printer,         action: () => doPrint(ranked, data.test.title, batchName, data.max_score) },
-          ] as const).map(({ label, icon: Icon, action }) => (
-            <button
-              key={label}
-              onClick={action}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold border border-border rounded-lg hover:bg-muted transition-colors"
-              title={`Download ${label}`}
-            >
-              <Icon className="w-3.5 h-3.5" /> {label}
+            { label: "CSV",   Icon: FileText,       action: () => doExportCSV(attempts, { ...exportCtx, filters: activeFilters }) },
+            { label: "Excel", Icon: FileSpreadsheet, action: () => doExportExcel(attempts, { ...exportCtx, filters: activeFilters }) },
+            { label: "PDF",   Icon: Download,        action: () => doExportPDF(attempts, { ...exportCtx, filters: activeFilters }) },
+            { label: "Print", Icon: Printer,         action: () => doPrint(attempts, { ...exportCtx, filters: activeFilters }) },
+          ] as const).map(({ label, Icon, action }) => (
+            <button key={label} onClick={action}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold border border-border rounded-lg hover:bg-muted transition-colors">
+              <Icon className="w-3.5 h-3.5" />{label}
             </button>
           ))}
         </div>
       </div>
 
-      {/* Table */}
+      {/* Body */}
       <div className="overflow-auto flex-1">
-        <table className="w-full text-sm min-w-[860px]">
-          <thead className="sticky top-0 z-10 bg-muted/90 backdrop-blur-sm border-b border-border">
-            <tr>
-              <th className="px-3 py-3 text-left text-xs font-semibold text-muted-foreground w-10">#</th>
-              <TH label="Student"    k="name" />
-              <TH label="Roll No"    k="roll" />
-              <th className="px-3 py-3 text-left text-xs font-semibold text-muted-foreground">Email</th>
-              <th className="px-3 py-3 text-left text-xs font-semibold text-muted-foreground">Batch</th>
-              <TH label="Score"      k="score" />
-              <TH label="%"          k="pct" />
-              <TH label="Correct"    k="correct" />
-              <TH label="Wrong"      k="wrong" />
-              <TH label="Unanswered" k="unanswered" />
-              <TH label="Time"       k="time" />
-              <TH label="Submitted"  k="submitted" />
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border">
-            {filtered.map(attempt => {
-              const rank   = rankMap.get(attempt.id) ?? 0;
-              const passed = attempt.percentage >= PASS_THRESHOLD;
-              return (
-                <tr
-                  key={attempt.id}
-                  onClick={() => onSelectAttempt(attempt)}
-                  className="hover:bg-muted/40 cursor-pointer transition-colors"
-                >
-                  <td className="px-3 py-3 w-10">
-                    {rank === 1 ? <span title="1st">🥇</span>
-                    : rank === 2 ? <span title="2nd">🥈</span>
-                    : rank === 3 ? <span title="3rd">🥉</span>
-                    : <span className="text-sm font-bold text-muted-foreground">{rank}</span>}
-                  </td>
-                  <td className="px-3 py-3">
-                    <div className="flex items-center gap-2.5">
-                      <div className="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center text-xs font-bold text-primary shrink-0">
-                        {attempt.profiles?.name?.[0]?.toUpperCase() ?? "?"}
-                      </div>
-                      <span className="font-medium text-foreground max-w-[140px] truncate">
-                        {attempt.profiles?.name ?? "Unknown"}
-                      </span>
-                    </div>
-                  </td>
-                  <td className="px-3 py-3 font-mono text-xs text-muted-foreground">
-                    {attempt.profiles?.roll_number ?? "—"}
-                  </td>
-                  <td className="px-3 py-3 text-xs text-muted-foreground max-w-[180px] truncate">
-                    {attempt.profiles?.email ?? "—"}
-                  </td>
-                  <td className="px-3 py-3 text-xs text-muted-foreground">{batchName}</td>
-                  <td className="px-3 py-3 font-bold">
-                    {attempt.score ?? 0}
-                    <span className="text-muted-foreground font-normal text-xs">/{attempt.max_score}</span>
-                  </td>
-                  <td className="px-3 py-3">
-                    <span className={`px-2 py-0.5 text-xs font-bold rounded-full ${
-                      passed ? "bg-green-500/10 text-green-600" : "bg-red-500/10 text-red-500"
-                    }`}>
-                      {attempt.percentage}%
-                    </span>
-                  </td>
-                  <td className="px-3 py-3 text-green-600 font-semibold tabular-nums">{attempt.correct}</td>
-                  <td className="px-3 py-3 text-red-500 font-semibold tabular-nums">{attempt.wrong}</td>
-                  <td className="px-3 py-3 text-muted-foreground tabular-nums">{attempt.unanswered}</td>
-                  <td className="px-3 py-3 text-xs text-muted-foreground whitespace-nowrap">{fmtTime(attempt.time_taken_secs)}</td>
-                  <td className="px-3 py-3 text-xs text-muted-foreground whitespace-nowrap">{fmtDate(attempt.submitted_at)}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-
-        {filtered.length === 0 && (
-          <div className="py-10 text-center text-muted-foreground text-sm">No results match your search.</div>
-        )}
-
-        {/* In-progress */}
-        {inProgress.length > 0 && (
-          <div className="px-4 py-3 border-t border-dashed border-border bg-yellow-500/5">
-            <p className="text-xs font-bold text-yellow-600 mb-2 flex items-center gap-1">
-              <Clock className="w-3.5 h-3.5" /> In Progress ({inProgress.length})
-            </p>
-            <div className="space-y-1.5">
-              {inProgress.map(a => (
-                <div key={a.id} className="flex items-center gap-2.5 text-xs text-muted-foreground">
-                  <div className="w-5 h-5 rounded-full bg-primary/10 flex items-center justify-center text-xs font-bold text-primary shrink-0">
-                    {a.profiles?.name?.[0]?.toUpperCase() ?? "?"}
-                  </div>
-                  <span className="font-medium">{a.profiles?.name ?? "Unknown"}</span>
-                  <span>{a.profiles?.email ?? ""}</span>
-                  <span className="ml-auto">Started {fmtDate(a.started_at)}</span>
-                </div>
-              ))}
-            </div>
+        {loading ? (
+          <div className="h-32 flex items-center justify-center gap-2 text-muted-foreground">
+            <Loader2 className="w-4 h-4 animate-spin" /><span className="text-sm">Loading…</span>
           </div>
+        ) : error ? (
+          <div className="h-32 flex flex-col items-center justify-center gap-2 text-muted-foreground text-sm">
+            <AlertCircle className="w-6 h-6 opacity-30" /><p>{error}</p>
+          </div>
+        ) : attempts.length === 0 && initialized ? (
+          <div className="h-32 flex flex-col items-center justify-center gap-2 text-muted-foreground">
+            <Filter className="w-8 h-8 opacity-20" />
+            <p className="text-sm font-medium">No results match the current filters.</p>
+          </div>
+        ) : (
+          <>
+            <table className="w-full text-sm min-w-[900px]">
+              <thead className="sticky top-0 z-10 bg-muted/90 backdrop-blur-sm border-b border-border">
+                <tr>
+                  <th className="px-3 py-3 text-left text-xs font-semibold text-muted-foreground w-10">#</th>
+                  <TH label="Student"    k="name" />
+                  <TH label="Roll No"    k="roll" />
+                  <th className="px-3 py-3 text-left text-xs font-semibold text-muted-foreground">Email</th>
+                  <th className="px-3 py-3 text-left text-xs font-semibold text-muted-foreground">Batch</th>
+                  <TH label="Score"      k="score" />
+                  <TH label="%"          k="pct" />
+                  <TH label="Correct"    k="correct" />
+                  <TH label="Wrong"      k="wrong" />
+                  <TH label="Unans."     k="unanswered" />
+                  <TH label="Time"       k="time" />
+                  <TH label="Submitted"  k="submitted" />
+                  <th className="px-3 py-3 text-left text-xs font-semibold text-muted-foreground">Method</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {attempts.map((attempt, _idx) => {
+                  const rank   = rankMap.get(attempt.id ?? "") ?? 0;
+                  const passed = attempt.percentage >= PASS_THRESHOLD;
+                  const isNA   = attempt.status === "not_attempted";
+                  const isIP   = attempt.status === "in_progress";
+
+                  return (
+                    <tr key={attempt.id ?? attempt.profiles?.id}
+                        onClick={() => !isNA && !isIP && attempt.id && onSelectAttempt(attempt)}
+                        className={`transition-colors ${!isNA && !isIP && attempt.id ? "hover:bg-muted/40 cursor-pointer" : "opacity-60"}`}>
+                      <td className="px-3 py-3 w-10">
+                        {isNA || isIP ? <span className="text-xs text-muted-foreground">—</span>
+                        : rank === 1  ? <span>🥇</span>
+                        : rank === 2  ? <span>🥈</span>
+                        : rank === 3  ? <span>🥉</span>
+                        : <span className="text-sm font-bold text-muted-foreground">{rank}</span>}
+                      </td>
+                      <td className="px-3 py-3">
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center text-xs font-bold text-primary shrink-0">
+                            {attempt.profiles?.name?.[0]?.toUpperCase() ?? "?"}
+                          </div>
+                          <span className="font-medium text-foreground max-w-[140px] truncate">
+                            {attempt.profiles?.name ?? "Unknown"}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-3 py-3 font-mono text-xs text-muted-foreground">{attempt.profiles?.roll_number ?? "—"}</td>
+                      <td className="px-3 py-3 text-xs text-muted-foreground max-w-[180px] truncate">{attempt.profiles?.email ?? "—"}</td>
+                      <td className="px-3 py-3 text-xs text-muted-foreground">{batchName}</td>
+                      <td className="px-3 py-3 font-bold">
+                        {isNA ? <span className="text-xs px-2 py-0.5 bg-muted rounded-full text-muted-foreground">Not Started</span>
+                        : isIP ? <span className="text-xs px-2 py-0.5 bg-yellow-500/10 rounded-full text-yellow-600">In Progress</span>
+                        : <>{attempt.score ?? 0}<span className="text-muted-foreground font-normal text-xs">/{attempt.max_score}</span></>}
+                      </td>
+                      <td className="px-3 py-3">
+                        {isNA || isIP ? "—" : (
+                          <span className={`px-2 py-0.5 text-xs font-bold rounded-full ${passed ? "bg-green-500/10 text-green-600" : "bg-red-500/10 text-red-500"}`}>
+                            {attempt.percentage}%
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-3 py-3 text-green-600 font-semibold tabular-nums">{attempt.correct || "—"}</td>
+                      <td className="px-3 py-3 text-red-500 font-semibold tabular-nums">{attempt.wrong || "—"}</td>
+                      <td className="px-3 py-3 text-muted-foreground tabular-nums">{attempt.unanswered ?? "—"}</td>
+                      <td className="px-3 py-3 text-xs text-muted-foreground whitespace-nowrap">{fmtTime(attempt.time_taken_secs)}</td>
+                      <td className="px-3 py-3 text-xs text-muted-foreground whitespace-nowrap">{fmtDate(attempt.submitted_at)}</td>
+                      <td className="px-3 py-3">
+                        {!isNA && !isIP && (
+                          <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${attempt.auto_submitted ? "bg-yellow-500/10 text-yellow-600" : "bg-green-500/10 text-green-600"}`}>
+                            {attempt.auto_submitted ? "Auto" : "Manual"}
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+
+            {/* Load More */}
+            {page < totalPages && (
+              <div className="p-4 text-center border-t border-dashed border-border">
+                <button
+                  onClick={() => load(page + 1, true, filters)}
+                  disabled={loadMore}
+                  className="px-4 py-2 text-sm font-semibold border border-border rounded-lg hover:bg-muted disabled:opacity-50 transition-colors flex items-center gap-2 mx-auto">
+                  {loadMore ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                  Load more ({total - attempts.length} remaining)
+                </button>
+              </div>
+            )}
+          </>
         )}
       </div>
     </div>
   );
 }
 
-// ────────────────────────────────── QuestionTab ──────────────────────────────
+// ─────────────────────────────────── QuestionTab ──────────────────────────────
 
-function QuestionTab({ data }: { data: AnalyticsData }) {
-  const submitted = data.attempts.filter(a => a.status === "submitted").length;
-
-  if (submitted === 0) {
+function QuestionTab({ questions, submittedCount }: {
+  questions: QuestionStat[];
+  submittedCount: number;
+}) {
+  if (submittedCount === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-24 text-muted-foreground">
         <BarChart3 className="w-12 h-12 opacity-20 mb-3" />
@@ -843,25 +894,19 @@ function QuestionTab({ data }: { data: AnalyticsData }) {
     );
   }
 
-  const qs = data.questions.map(q => ({
-    ...q,
-    accuracy:
-      q.type === "mcq" && q.stats.total > 0
-        ? Math.round((q.stats.correct / q.stats.total) * 100)
-        : null,
-  }));
+  const qs = questions.map(q => {
+    const { total, correct } = q.stats;
+    const accuracy   = q.type === "mcq" && total > 0 ? Math.round((correct / total) * 100) : null;
+    const difficulty = accuracy != null ? 100 - accuracy : null;
+    return { ...q, accuracy, difficulty };
+  });
 
   const mcqOnly = qs.filter(q => q.accuracy !== null);
-  const hardest = mcqOnly.length
-    ? [...mcqOnly].sort((a, b) => (a.accuracy ?? 100) - (b.accuracy ?? 100))[0]
-    : null;
-  const easiest = mcqOnly.length
-    ? [...mcqOnly].sort((a, b) => (b.accuracy ?? 0) - (a.accuracy ?? 0))[0]
-    : null;
+  const hardest = mcqOnly.length ? [...mcqOnly].sort((a, b) => (a.accuracy ?? 100) - (b.accuracy ?? 100))[0] : null;
+  const easiest = mcqOnly.length ? [...mcqOnly].sort((a, b) => (b.accuracy ?? 0)   - (a.accuracy ?? 0))[0]   : null;
 
   return (
     <div className="p-6 space-y-5">
-      {/* Callout cards */}
       {(hardest || easiest) && (
         <div className="grid sm:grid-cols-2 gap-4">
           {hardest && (
@@ -872,7 +917,7 @@ function QuestionTab({ data }: { data: AnalyticsData }) {
               </div>
               <p className="text-sm font-medium text-foreground line-clamp-2">{hardest.question}</p>
               <p className="text-xs text-muted-foreground mt-1.5">
-                Only <strong>{hardest.accuracy}%</strong> of students answered correctly
+                Only <strong>{hardest.accuracy}%</strong> answered correctly · Difficulty <strong>{hardest.difficulty}%</strong>
               </p>
             </div>
           )}
@@ -884,45 +929,34 @@ function QuestionTab({ data }: { data: AnalyticsData }) {
               </div>
               <p className="text-sm font-medium text-foreground line-clamp-2">{easiest.question}</p>
               <p className="text-xs text-muted-foreground mt-1.5">
-                <strong>{easiest.accuracy}%</strong> of students answered correctly
+                <strong>{easiest.accuracy}%</strong> answered correctly · Difficulty <strong>{easiest.difficulty}%</strong>
               </p>
             </div>
           )}
         </div>
       )}
 
-      {/* Per-question table */}
       <div className="bg-card border border-border rounded-xl overflow-hidden">
         <table className="w-full text-sm">
           <thead className="bg-muted/50 border-b border-border">
             <tr>
-              {["#", "Question", "Type", "Marks", "Attempted", "Correct", "Accuracy"].map(h => (
-                <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground whitespace-nowrap">
-                  {h}
-                </th>
+              {["#","Question","Type","Marks","Attempted","Correct","Wrong","Unanswered","Accuracy","Difficulty"].map(h => (
+                <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground whitespace-nowrap">{h}</th>
               ))}
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
             {qs.map((q, i) => {
-              const pct = q.accuracy;
-              const bar = pct === null ? "bg-muted"
-                        : pct >= 70   ? "bg-green-500"
-                        : pct >= 40   ? "bg-yellow-500"
-                                      : "bg-red-500";
-              const pctCls = pct === null ? "text-muted-foreground"
-                           : pct >= 70   ? "text-green-600"
-                           : pct >= 40   ? "text-yellow-600"
-                                         : "text-red-500";
+              const { accuracy, difficulty } = q;
+              const bar    = accuracy == null ? "bg-muted"    : accuracy >= 70 ? "bg-green-500" : accuracy >= 40 ? "bg-yellow-500" : "bg-red-500";
+              const pctCls = accuracy == null ? "text-muted-foreground" : accuracy >= 70 ? "text-green-600" : accuracy >= 40 ? "text-yellow-600" : "text-red-500";
               const isHardest = hardest?.id === q.id;
               const isEasiest = easiest?.id === q.id && easiest.id !== hardest?.id;
 
               return (
-                <tr key={q.id} className={`transition-colors hover:bg-muted/30 ${
-                  isHardest ? "bg-red-500/5" : isEasiest ? "bg-green-500/5" : ""
-                }`}>
+                <tr key={q.id} className={`transition-colors hover:bg-muted/30 ${isHardest ? "bg-red-500/5" : isEasiest ? "bg-green-500/5" : ""}`}>
                   <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{i + 1}</td>
-                  <td className="px-4 py-3 max-w-[280px]">
+                  <td className="px-4 py-3 max-w-[240px]">
                     <p className="text-sm font-medium text-foreground line-clamp-2">{q.question}</p>
                     {isHardest && <span className="text-xs text-red-500 font-bold">⚠ Hardest</span>}
                     {isEasiest && <span className="text-xs text-green-600 font-bold">✓ Easiest</span>}
@@ -937,17 +971,20 @@ function QuestionTab({ data }: { data: AnalyticsData }) {
                   <td className="px-4 py-3 font-bold text-foreground tabular-nums">{q.marks}</td>
                   <td className="px-4 py-3 text-muted-foreground tabular-nums">{q.stats.total}</td>
                   <td className="px-4 py-3 text-green-600 font-semibold tabular-nums">{q.stats.correct}</td>
+                  <td className="px-4 py-3 text-red-500 font-semibold tabular-nums">{q.stats.wrong}</td>
+                  <td className="px-4 py-3 text-muted-foreground tabular-nums">{q.stats.unanswered}</td>
                   <td className="px-4 py-3">
-                    {pct === null ? (
-                      <span className="text-xs text-muted-foreground">N/A</span>
-                    ) : (
-                      <div className="flex items-center gap-2 min-w-[100px]">
+                    {accuracy == null ? <span className="text-xs text-muted-foreground">N/A</span> : (
+                      <div className="flex items-center gap-2 min-w-[90px]">
                         <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
-                          <div className={`h-full ${bar} rounded-full`} style={{ width: `${pct}%` }} />
+                          <div className={`h-full ${bar} rounded-full`} style={{ width: `${accuracy}%` }} />
                         </div>
-                        <span className={`text-xs font-bold w-9 text-right tabular-nums ${pctCls}`}>{pct}%</span>
+                        <span className={`text-xs font-bold w-9 text-right tabular-nums ${pctCls}`}>{accuracy}%</span>
                       </div>
                     )}
+                  </td>
+                  <td className="px-4 py-3 tabular-nums text-xs text-muted-foreground">
+                    {difficulty != null ? `${difficulty}%` : "N/A"}
                   </td>
                 </tr>
               );
@@ -959,9 +996,139 @@ function QuestionTab({ data }: { data: AnalyticsData }) {
   );
 }
 
-// ────────────────────────────────── Main component ───────────────────────────
+// ─────────────────────────────────── IntegrityTab ─────────────────────────────
 
-type Tab = "overview" | "leaderboard" | "questions";
+function IntegrityTab({ summary, durationMins }: {
+  summary: IntegritySummary;
+  durationMins: number;
+}) {
+  const enrollmentCards = [
+    { label: "Total Enrolled",  value: summary.total_enrolled ?? "—",   cls: "text-foreground",          sub: "in batch" },
+    { label: "Attempted",       value: summary.total_attempted,          cls: "text-blue-500",            sub: "started the test" },
+    { label: "Submitted",       value: summary.submitted,                cls: "text-green-500",           sub: "completed" },
+    { label: "In Progress",     value: summary.in_progress,              cls: "text-yellow-500",          sub: "currently active" },
+    { label: "Not Started",     value: summary.not_started ?? "—",       cls: "text-muted-foreground",    sub: "haven't attempted" },
+    { label: "Auto Submitted",  value: summary.auto_submitted,           cls: "text-orange-500",          sub: "time expired" },
+  ];
+
+  return (
+    <div className="p-6 space-y-6 overflow-auto">
+      {/* Enrollment stats */}
+      <div>
+        <h3 className="text-sm font-bold mb-3 flex items-center gap-2">
+          <Shield className="w-4 h-4 text-primary" /> Exam Integrity Overview
+        </h3>
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+          {enrollmentCards.map(({ label, value, cls, sub }) => (
+            <div key={label} className="bg-card border border-border rounded-xl p-4 text-center">
+              <p className={`text-2xl font-black tabular-nums ${cls}`}>{value}</p>
+              <p className="text-xs font-semibold text-muted-foreground mt-0.5">{label}</p>
+              <p className="text-[10px] text-muted-foreground mt-0.5">{sub}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Fastest / Slowest */}
+      {(summary.fastest || summary.slowest) && (
+        <div className="grid sm:grid-cols-2 gap-4">
+          {summary.fastest && (
+            <div className="bg-card border border-border rounded-xl p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <Zap className="w-4 h-4 text-green-500" />
+                <span className="text-xs font-bold text-green-600 uppercase tracking-wide">Fastest Student</span>
+              </div>
+              <p className="font-semibold text-foreground">{summary.fastest.name}</p>
+              <div className="flex items-center gap-4 mt-1.5 text-xs text-muted-foreground">
+                <span>Time: <strong className="text-foreground">{fmtTime(summary.fastest.time_secs)}</strong></span>
+                <span>Score: <strong className="text-foreground">{summary.fastest.pct}%</strong></span>
+              </div>
+            </div>
+          )}
+          {summary.slowest && (
+            <div className="bg-card border border-border rounded-xl p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <Clock className="w-4 h-4 text-blue-500" />
+                <span className="text-xs font-bold text-blue-600 uppercase tracking-wide">Slowest Student</span>
+              </div>
+              <p className="font-semibold text-foreground">{summary.slowest.name}</p>
+              <div className="flex items-center gap-4 mt-1.5 text-xs text-muted-foreground">
+                <span>Time: <strong className="text-foreground">{fmtTime(summary.slowest.time_secs)}</strong></span>
+                <span>Score: <strong className="text-foreground">{summary.slowest.pct}%</strong></span>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Average completion time */}
+      <div className="bg-card border border-border rounded-xl p-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-xs text-muted-foreground uppercase font-semibold">Avg Completion Time</p>
+            <p className="text-2xl font-black text-foreground mt-1">{fmtTime(summary.avg_time_secs)}</p>
+          </div>
+          <div className="text-right text-xs text-muted-foreground">
+            <p>Allowed: <strong className="text-foreground">{durationMins} min</strong></p>
+            {summary.avg_time_secs && (
+              <p className="mt-0.5">
+                Used <strong className={summary.avg_time_secs > durationMins * 60 * 0.8 ? "text-orange-500" : "text-green-500"}>
+                  {Math.round((summary.avg_time_secs / (durationMins * 60)) * 100)}%
+                </strong> of allowed time
+              </p>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Suspicious attempts */}
+      <div>
+        <div className="flex items-center gap-2 mb-3">
+          <Eye className="w-4 h-4 text-orange-500" />
+          <h3 className="text-sm font-bold">Suspicious Attempts</h3>
+          <span className={`text-xs px-2 py-0.5 rounded-full font-bold ml-1 ${
+            summary.suspicious.length > 0 ? "bg-orange-500/10 text-orange-600" : "bg-green-500/10 text-green-600"
+          }`}>
+            {summary.suspicious.length > 0 ? `${summary.suspicious.length} flagged` : "None flagged"}
+          </span>
+        </div>
+        {summary.suspicious.length === 0 ? (
+          <div className="bg-green-500/5 border border-green-400/20 rounded-xl p-4 text-sm text-green-700">
+            No suspicious patterns detected. All completion times are within expected range.
+          </div>
+        ) : (
+          <div className="bg-card border border-border rounded-xl overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className="bg-muted/50 border-b border-border">
+                <tr>
+                  {["Student","Reason","Time Taken","Score"].map(h => (
+                    <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {summary.suspicious.map(s => (
+                  <tr key={s.id} className="hover:bg-muted/30">
+                    <td className="px-4 py-3 font-semibold">{s.name}</td>
+                    <td className="px-4 py-3 text-xs text-orange-600">{s.reason}</td>
+                    <td className="px-4 py-3 text-xs tabular-nums">{fmtTime(s.time_secs)}</td>
+                    <td className="px-4 py-3">
+                      <span className={`text-xs px-2 py-0.5 font-bold rounded-full ${s.pct >= PASS_THRESHOLD ? "bg-green-500/10 text-green-600" : "bg-red-500/10 text-red-500"}`}>
+                        {s.pct}%
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────── Main component ───────────────────────────────
 
 export function TestAnalyticsModal({
   test,
@@ -970,36 +1137,45 @@ export function TestAnalyticsModal({
   test: any;
   onClose: () => void;
 }) {
-  const [data,             setData]            = useState<AnalyticsData | null>(null);
-  const [loading,          setLoading]         = useState(true);
-  const [error,            setError]           = useState<string | null>(null);
-  const [activeTab,        setActiveTab]       = useState<Tab>("overview");
-  const [selectedAttempt,  setSelectedAttempt] = useState<AttemptRow | null>(null);
+  const { user }   = useAuth();
+  const adminName  = user?.name ?? "Admin";
 
-  const load = () => {
-    setLoading(true);
-    setError(null);
-    getTestAnalytics(test.id).then(({ data: d, error: e }) => {
-      if (e || !d) setError(e ?? "Failed to load analytics");
-      else setData(d);
+  const [summary,  setSummary]  = useState<AnalyticsSummary | null>(null);
+  const [loading,  setLoading]  = useState(true);
+  const [error,    setError]    = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<Tab>("overview");
+  const [selectedAttempt, setSelectedAttempt] = useState<AttemptRow | null>(null);
+
+  const loadSummary = useCallback(() => {
+    setLoading(true); setError(null);
+    getTestAnalyticsSummary(test.id).then(({ data, error: e }) => {
+      if (e || !data) setError(e ?? "Failed to load analytics");
+      else setSummary(data);
       setLoading(false);
     });
+  }, [test.id]);
+
+  useEffect(() => { loadSummary(); }, [test.id]);
+
+  const batchName       = summary?.test.batch?.name ?? test.batches?.name ?? "All Batches";
+  const institutionName = summary?.test.institution_name ?? "—";
+  const maxScore        = summary?.max_score ?? 0;
+
+  const exportCtx: ExportCtx = {
+    testTitle: test.title, batchName, institutionName, adminName, maxScore, filters: "—",
   };
 
-  useEffect(() => { load(); }, [test.id]);
-
   const TABS: { key: Tab; label: string; Icon: React.ElementType }[] = [
-    { key: "overview",    label: "Overview",    Icon: BarChart3 },
-    { key: "leaderboard", label: "Leaderboard", Icon: Trophy    },
-    { key: "questions",   label: "Questions",   Icon: Target    },
+    { key: "overview",   label: "Overview",   Icon: BarChart3 },
+    { key: "leaderboard",label: "Leaderboard",Icon: Trophy    },
+    { key: "questions",  label: "Questions",  Icon: Target    },
+    { key: "integrity",  label: "Integrity",  Icon: Shield    },
   ];
 
-  const typeLabel = test.type === "coding"   ? "CODING"
-                  : test.type === "aptitude" ? "APTITUDE"
-                  :                            "MOCK";
-  const typeCls   = test.type === "coding"   ? "bg-blue-500/10 text-blue-600"
+  const typeLabel = test.type === "coding" ? "CODING" : test.type === "aptitude" ? "APTITUDE" : "MOCK";
+  const typeCls   = test.type === "coding" ? "bg-blue-500/10 text-blue-600"
                   : test.type === "aptitude" ? "bg-purple-500/10 text-purple-600"
-                  :                            "bg-emerald-500/10 text-emerald-600";
+                  : "bg-emerald-500/10 text-emerald-600";
 
   return (
     <div className="fixed inset-0 z-50 bg-background flex flex-col overflow-hidden">
@@ -1011,31 +1187,30 @@ export function TestAnalyticsModal({
           <span className={`hidden sm:inline-block text-xs px-2 py-0.5 rounded-full font-semibold shrink-0 ${typeCls}`}>
             {typeLabel}
           </span>
+          {summary && (
+            <span className="hidden lg:inline-block text-xs text-muted-foreground truncate">
+              {institutionName !== "—" && `· ${institutionName}`}
+              {batchName && ` · ${batchName}`}
+            </span>
+          )}
         </div>
-        <button
-          onClick={onClose}
-          className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground transition-colors shrink-0"
-        >
+        <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground shrink-0">
           <X className="w-5 h-5" />
         </button>
       </header>
 
-      {/* Tab bar — hidden when drilling into an attempt */}
+      {/* Tab bar */}
       {!selectedAttempt && (
         <div className="border-b border-border bg-card shrink-0">
           <div className="flex px-5 gap-0">
             {TABS.map(({ key, label, Icon }) => (
-              <button
-                key={key}
-                onClick={() => setActiveTab(key)}
+              <button key={key} onClick={() => setActiveTab(key)}
                 className={`flex items-center gap-1.5 px-4 py-3 text-sm font-semibold border-b-2 transition-colors ${
                   activeTab === key
                     ? "border-primary text-primary"
                     : "border-transparent text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                <Icon className="w-4 h-4" />
-                {label}
+                }`}>
+                <Icon className="w-4 h-4" />{label}
               </button>
             ))}
           </div>
@@ -1046,21 +1221,18 @@ export function TestAnalyticsModal({
       <div className="flex-1 overflow-hidden">
         {loading ? (
           <div className="h-full flex items-center justify-center gap-3 text-muted-foreground">
-            <Loader2 className="w-6 h-6 animate-spin" />
-            <span>Loading analytics…</span>
+            <Loader2 className="w-6 h-6 animate-spin" /><span>Loading analytics…</span>
           </div>
         ) : error ? (
           <div className="h-full flex flex-col items-center justify-center gap-3 text-muted-foreground">
             <AlertCircle className="w-10 h-10 opacity-30" />
             <p className="font-medium">{error}</p>
-            <button
-              onClick={load}
-              className="px-4 py-2 text-sm font-semibold bg-primary text-primary-foreground rounded-lg hover:opacity-90"
-            >
+            <button onClick={loadSummary}
+              className="px-4 py-2 text-sm font-semibold bg-primary text-primary-foreground rounded-lg hover:opacity-90">
               Retry
             </button>
           </div>
-        ) : !data ? null : selectedAttempt ? (
+        ) : !summary ? null : selectedAttempt ? (
           <AttemptDetailView
             attempt={selectedAttempt}
             onBack={() => setSelectedAttempt(null)}
@@ -1070,17 +1242,41 @@ export function TestAnalyticsModal({
           <>
             {activeTab === "overview" && (
               <div className="h-full overflow-auto">
-                <OverviewTab data={data} />
+                <OverviewTab
+                  summary={summary.summary}
+                  maxScore={summary.max_score}
+                  totalQuestions={summary.total_questions}
+                  durationMins={summary.test.duration_mins}
+                />
               </div>
             )}
             {activeTab === "leaderboard" && (
               <div className="h-full flex flex-col overflow-hidden">
-                <LeaderboardTab data={data} onSelectAttempt={setSelectedAttempt} />
+                <LeaderboardTab
+                  testId={test.id}
+                  hasBatch={!!summary.test.batch_id}
+                  batchName={batchName}
+                  maxScore={maxScore}
+                  totalQuestions={summary.total_questions}
+                  exportCtx={exportCtx}
+                  onSelectAttempt={setSelectedAttempt}
+                />
               </div>
             )}
             {activeTab === "questions" && (
               <div className="h-full overflow-auto">
-                <QuestionTab data={data} />
+                <QuestionTab
+                  questions={summary.questions}
+                  submittedCount={summary.summary.submitted}
+                />
+              </div>
+            )}
+            {activeTab === "integrity" && (
+              <div className="h-full overflow-auto">
+                <IntegrityTab
+                  summary={summary.summary}
+                  durationMins={summary.test.duration_mins}
+                />
               </div>
             )}
           </>

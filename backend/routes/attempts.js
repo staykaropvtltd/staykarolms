@@ -105,6 +105,13 @@ router.post("/:id/answers", authenticate, requireRole("student"), async (req, re
       .select();
 
     if (error) return res.status(400).json({ error: error.message });
+
+    // Update last_answered_at timestamp (non-blocking)
+    supabase.from("test_attempts")
+      .update({ last_answered_at: new Date().toISOString() })
+      .eq("id", req.params.id)
+      .then(({ error: e }) => { if (e) console.error("[attempts] last_answered_at update:", e.message); });
+
     return res.json({ data });
   } catch (err) {
     return next(err);
@@ -143,6 +150,13 @@ router.post("/:id/answer", authenticate, requireRole("student"), async (req, res
       .single();
 
     if (error) return res.status(400).json({ error: error.message });
+
+    // Update last_answered_at (non-blocking)
+    supabase.from("test_attempts")
+      .update({ last_answered_at: new Date().toISOString() })
+      .eq("id", req.params.id)
+      .then(({ error: e }) => { if (e) console.error("[attempts] last_answered_at update:", e.message); });
+
     return res.json({ data });
   } catch (err) {
     return next(err);
@@ -151,7 +165,8 @@ router.post("/:id/answer", authenticate, requireRole("student"), async (req, res
 
 // POST /api/attempts/:id/submit — finalize attempt, auto-grade MCQ
 router.post("/:id/submit", authenticate, requireRole("student"), async (req, res, next) => {
-  const attemptId = req.params.id;
+  const attemptId    = req.params.id;
+  const autoSubmitted = !!(req.body && req.body.auto_submitted);
 
   try {
     // Fetch attempt — we need test_id before we can fetch the test,
@@ -217,13 +232,21 @@ router.post("/:id/submit", authenticate, requireRole("student"), async (req, res
       if (gradeErr) console.error("[attempts/submit] bulk grade error:", gradeErr.message);
     }
 
-    // Finalize attempt
+    // Finalize attempt — store denormalised counts for fast leaderboard queries
+    const correctCount  = gradedRows.filter(r => r.is_correct).length;
+    const answeredCount = gradedRows.filter(r => r.answer !== null && r.answer !== undefined && r.answer !== "").length;
+    const wrongCount    = answeredCount - correctCount;
+
     const { data, error } = await supabase
       .from("test_attempts")
       .update({
-        status: "submitted",
-        submitted_at: new Date().toISOString(),
-        score: totalScore,
+        status:         "submitted",
+        submitted_at:   new Date().toISOString(),
+        score:          totalScore,
+        auto_submitted: autoSubmitted,
+        correct_count:  correctCount,
+        wrong_count:    wrongCount,
+        answered_count: answeredCount,
       })
       .eq("id", attemptId)
       .select()
@@ -264,6 +287,17 @@ router.get("/:id/result", authenticate, async (req, res, next) => {
       if (attempt.tests?.institution_id !== req.user.institution_id) {
         return res.status(403).json({ error: "Forbidden" });
       }
+    }
+
+    // Audit: log every admin/faculty review of a student attempt
+    if (req.user.role !== "student") {
+      try {
+        const { logAudit } = require("../lib/audit");
+        await logAudit(req, req.user, "attempt_review", "test_attempts", req.params.id, "info", "success", {
+          student_id: attempt.student_id,
+          test_id: attempt.test_id,
+        });
+      } catch (_) {}
     }
 
     // Normalize options on each answer's embedded question

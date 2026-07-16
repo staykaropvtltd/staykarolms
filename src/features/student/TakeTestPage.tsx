@@ -48,6 +48,33 @@ export function TakeTestPage() {
     return () => clearInterval(timer);
   }, [timeLeft, isSubmitted, isReviewing]);
 
+  // Auto-submit when timer expires (test and attemptId must already be set)
+  useEffect(() => {
+    if (timeLeft !== 0 || isSubmitted || !attemptId || !test) return;
+    (async () => {
+      setIsSubmitted(true);
+      toast.info("Time's up! Submitting automatically…");
+      const { data: submitData } = await submitAttempt(attemptId, true);
+      if (submitData) {
+        const { data: resultData } = await getAttemptResult(attemptId);
+        if (resultData) {
+          setResult({
+            score: resultData.score ?? 0,
+            maxScore: resultData.max_score ?? questions.reduce((sum: number, q: any) => sum + (q.marks || 1), 0),
+            timeTaken: (test.duration_mins || 30) * 60,
+          });
+          return;
+        }
+      }
+      let score = 0;
+      const maxScore = questions.reduce((sum: number, q: any) => sum + (q.marks || 1), 0);
+      questions.forEach((q: any) => {
+        if (answers[q.id] !== undefined && answers[q.id] === q.correct_answer) score += (q.marks || 1);
+      });
+      setResult({ score, maxScore, timeTaken: (test.duration_mins || 30) * 60 });
+    })();
+  }, [timeLeft, isSubmitted, attemptId, test]);
+
   const formatTime = (sec: number) => {
     const m = Math.floor(sec / 60);
     const s = sec % 60;
