@@ -524,6 +524,146 @@ router.post(
   }
 );
 
+// POST /api/tests/:id/questions/bulk — batch import (admin/faculty/super-admin)
+// Validates all rows, checks for duplicates against existing questions,
+// inserts in chunks of 500. Rolls back by deleting already-inserted rows
+// if any chunk fails mid-way.
+router.post(
+  "/:id/questions/bulk",
+  authenticate,
+  requireRole("admin", "faculty", "super-admin"),
+  async (req, res, next) => {
+    const { questions } = req.body;
+
+    if (!Array.isArray(questions) || questions.length === 0) {
+      return res.status(400).json({ error: "questions array is required and must not be empty" });
+    }
+    if (questions.length > 10000) {
+      return res.status(400).json({ error: "Maximum 10,000 questions per import" });
+    }
+
+    try {
+      // Verify test exists and belongs to this institution
+      let testQuery = supabase.from("tests").select("id, institution_id").eq("id", req.params.id);
+      if (req.user.role !== "super-admin") {
+        testQuery = testQuery.eq("institution_id", req.user.institution_id);
+      }
+      const { data: test, error: testError } = await testQuery.single();
+      if (testError || !test) return res.status(404).json({ error: "Test not found" });
+
+      // Fetch existing question texts for duplicate detection
+      const { data: existing } = await supabase
+        .from("test_questions").select("question").eq("test_id", req.params.id);
+      const existingTexts = new Set(
+        (existing || []).map(q => (q.question || "").toLowerCase().trim())
+      );
+
+      // Highest current order_index so new rows slot in after existing ones
+      const { data: maxRow } = await supabase
+        .from("test_questions").select("order_index").eq("test_id", req.params.id)
+        .order("order_index", { ascending: false }).limit(1).maybeSingle();
+      let nextOrder = (maxRow?.order_index ?? -1) + 1;
+
+      // Server-side validation
+      const validRows = [];
+      const errors = [];
+
+      questions.forEach((q, i) => {
+        const rowNum = i + 1;
+        const rowErrors = [];
+        const text = (q.question || "").trim();
+
+        if (!text) rowErrors.push("Question text is required");
+        else if (text.length < 5) rowErrors.push("Question is too short");
+        else if (text.length > 2000) rowErrors.push("Question exceeds 2000 characters");
+
+        const type = (q.type || "mcq").toLowerCase();
+        if (!["mcq", "coding", "short"].includes(type)) {
+          rowErrors.push(`Invalid type "${type}"`);
+        }
+
+        const marksRaw = Number(q.marks);
+        const marks = (Number.isInteger(marksRaw) && marksRaw >= 1 && marksRaw <= 100) ? marksRaw : null;
+        if (marks === null) {
+          rowErrors.push("Marks must be an integer 1–100");
+        }
+
+        if (type === "mcq") {
+          const opts = Array.isArray(q.options) ? q.options : [];
+          const filled = opts.filter(o => String(o || "").trim()).length;
+          if (filled < 4) rowErrors.push(`MCQ requires 4 non-empty options (got ${filled})`);
+          const ca = parseInt(String(q.correct_answer ?? "0"));
+          if (isNaN(ca) || ca < 0 || ca > 3) rowErrors.push("correct_answer must be 0–3");
+          else if (!String(opts[ca] || "").trim()) rowErrors.push("correct_answer points to empty option");
+        }
+
+        const textLower = text.toLowerCase();
+        if (text && existingTexts.has(textLower)) {
+          rowErrors.push("Duplicate of an existing question in this test");
+        }
+
+        if (rowErrors.length > 0) {
+          errors.push({ row: rowNum, question: text.substring(0, 80), errors: rowErrors });
+        } else {
+          existingTexts.add(textLower); // prevent within-batch duplication
+          validRows.push({
+            test_id: req.params.id,
+            question: text,
+            type,
+            options: type === "mcq" ? (q.options || []).map(o => String(o).trim()) : null,
+            correct_answer: type === "mcq" ? String(q.correct_answer ?? "0") : null,
+            marks,
+            order_index: nextOrder++,
+          });
+        }
+      });
+
+      if (validRows.length === 0) {
+        return res.status(422).json({
+          error: "No valid questions to import",
+          data: { inserted: 0, skipped: errors.length, errors },
+        });
+      }
+
+      // Batch insert in chunks of 500 — rollback by deleting on partial failure
+      const CHUNK = 500;
+      const insertedIds = [];
+      let insertError = null;
+
+      for (let i = 0; i < validRows.length; i += CHUNK) {
+        const chunk = validRows.slice(i, i + CHUNK);
+        const { data: inserted, error: chunkErr } = await supabase
+          .from("test_questions").insert(chunk).select("id");
+
+        if (chunkErr) { insertError = chunkErr; break; }
+        if (inserted) insertedIds.push(...inserted.map(r => r.id));
+      }
+
+      if (insertError) {
+        // Rollback any rows inserted before the failure
+        if (insertedIds.length > 0) {
+          await supabase.from("test_questions").delete().in("id", insertedIds);
+        }
+        return res.status(400).json({ error: "Import failed: " + insertError.message, data: { inserted: 0, skipped: errors.length, errors } });
+      }
+
+      // Audit log (non-blocking)
+      try {
+        const { logAudit } = require("../lib/audit");
+        await logAudit(req, req.user, "questions_bulk_import", "test_questions", req.params.id, "info", "success", {
+          inserted: insertedIds.length, skipped: errors.length,
+        });
+      } catch (_) {}
+
+      return res.status(201).json({
+        data: { inserted: insertedIds.length, skipped: errors.length, errors },
+      });
+    } catch (err) {
+      return next(err);
+    }
+  }
+);
+
 // PUT /api/tests/:id/questions/:qid — update an existing question
 router.put(
   "/:id/questions/:qid",

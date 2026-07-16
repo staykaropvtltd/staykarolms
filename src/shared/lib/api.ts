@@ -341,6 +341,21 @@ export const updateTestQuestion = (
 export const deleteTestQuestion = (testId: string, qId: string) =>
   apiFetch(`/api/tests/${testId}/questions/${qId}`, { method: "DELETE" });
 
+export const bulkImportQuestions = (
+  testId: string,
+  questions: Array<{
+    question: string;
+    type: string;
+    options?: string[];
+    correct_answer?: string;
+    marks?: number;
+  }>
+) =>
+  apiFetch(`/api/tests/${testId}/questions/bulk`, {
+    method: "POST",
+    body: JSON.stringify({ questions }),
+  });
+
 // ── Attempts ─────────────────────────────────────────────────────────────────
 
 export const startAttempt = (testId: string) =>

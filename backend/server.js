@@ -120,8 +120,8 @@ app.use(generalLimiter);
 // Upload route: higher body limit (base64 video ≈ 150 MB), registered before global parser
 app.use("/api/upload", uploadLimiter, express.json({ limit: "150mb" }), require("./routes/upload"));
 
-// All other routes use the standard 1 MB JSON body limit
-app.use(express.json({ limit: "1mb" }));
+// Standard routes: 15 MB limit to support bulk question imports (10k × ~300 bytes ≈ 3 MB)
+app.use(express.json({ limit: "15mb" }));
 
 // ── Health check ────────────────────────────────────────────
 // Cache the probe result for 30 s so rapid polling (Vercel healthchecks,
