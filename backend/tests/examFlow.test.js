@@ -175,7 +175,13 @@ describe('POST /api/attempts/:id/answer', () => {
     const supa = createMockSupabase({ profiles: ok(STUDENT) });
     supa.from.mockImplementation((table) => {
       if (table === 'profiles') return { select: jest.fn().mockReturnThis(), eq: jest.fn().mockReturnThis(), single: jest.fn().mockResolvedValue(ok(STUDENT)) };
-      if (table === 'test_attempts') return { select: jest.fn().mockReturnThis(), eq: jest.fn().mockReturnThis(), single: jest.fn().mockResolvedValue(ok(ATTEMPT)) };
+      if (table === 'test_attempts') return {
+        select: jest.fn().mockReturnThis(),
+        eq: jest.fn().mockReturnThis(),
+        single: jest.fn().mockResolvedValue(ok(ATTEMPT)),
+        // fire-and-forget last_answered_at update
+        update: jest.fn().mockReturnValue({ eq: jest.fn().mockReturnValue({ then: (r) => r({ error: null }) }) }),
+      };
       if (table === 'test_answers') return {
         upsert: jest.fn().mockReturnValue({
           select: jest.fn().mockReturnValue({
