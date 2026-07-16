@@ -152,6 +152,136 @@ router.get(
   }
 );
 
+// GET /api/tests/:id/analytics — full analytics for admins/faculty
+router.get(
+  "/:id/analytics",
+  authenticate,
+  requireRole("admin", "faculty", "super-admin"),
+  async (req, res, next) => {
+    try {
+      const testId = req.params.id;
+
+      // Fetch test + questions + batch name, scoped to institution
+      let testQuery = supabase
+        .from("tests")
+        .select(
+          "id, title, type, duration_mins, batch_id, institution_id," +
+          " batches:batch_id ( name )," +
+          " test_questions ( id, question, type, marks, options, correct_answer, order_index )"
+        )
+        .eq("id", testId);
+      if (req.user.role !== "super-admin") {
+        testQuery = testQuery.eq("institution_id", req.user.institution_id);
+      }
+      const { data: test, error: testError } = await testQuery.single();
+      if (testError || !test) return res.status(404).json({ error: "Test not found" });
+
+      const questions = (test.test_questions || []).sort(
+        (a, b) => (a.order_index ?? 0) - (b.order_index ?? 0)
+      );
+      const totalQuestions = questions.length;
+      const maxScore = questions.reduce((s, q) => s + (q.marks || 1), 0);
+
+      // All attempts with student profiles (including in-progress for total count)
+      const { data: attempts } = await supabase
+        .from("test_attempts")
+        .select("id, status, score, started_at, submitted_at, profiles:student_id ( id, name, email, roll_number )")
+        .eq("test_id", testId)
+        .order("submitted_at", { ascending: false });
+
+      const allAttempts = attempts || [];
+      const submittedIds = allAttempts
+        .filter((a) => a.status === "submitted")
+        .map((a) => a.id);
+
+      // One query for all answers of submitted attempts — aggregate in JS
+      const attemptStats = {};  // { [attempt_id]: { correct, wrong, answered } }
+      const questionAccuracy = {}; // { [question_id]: { total, correct } }
+
+      if (submittedIds.length > 0) {
+        const { data: allAnswers } = await supabase
+          .from("test_answers")
+          .select("attempt_id, question_id, is_correct, answer")
+          .in("attempt_id", submittedIds);
+
+        for (const ans of allAnswers || []) {
+          if (!attemptStats[ans.attempt_id]) {
+            attemptStats[ans.attempt_id] = { correct: 0, wrong: 0, answered: 0 };
+          }
+          const hasAnswer =
+            ans.answer !== null && ans.answer !== undefined && ans.answer !== "";
+          if (hasAnswer) {
+            attemptStats[ans.attempt_id].answered++;
+            if (ans.is_correct) attemptStats[ans.attempt_id].correct++;
+            else attemptStats[ans.attempt_id].wrong++;
+          }
+
+          if (!questionAccuracy[ans.question_id]) {
+            questionAccuracy[ans.question_id] = { total: 0, correct: 0 };
+          }
+          if (hasAnswer) {
+            questionAccuracy[ans.question_id].total++;
+            if (ans.is_correct) questionAccuracy[ans.question_id].correct++;
+          }
+        }
+      }
+
+      // Augment each attempt with computed fields
+      const augmented = allAttempts.map((attempt) => {
+        const s = attemptStats[attempt.id] || { correct: 0, wrong: 0, answered: 0 };
+        const timeTakenSecs =
+          attempt.submitted_at && attempt.started_at
+            ? Math.max(
+                0,
+                Math.floor(
+                  (new Date(attempt.submitted_at) - new Date(attempt.started_at)) / 1000
+                )
+              )
+            : null;
+        const pct =
+          maxScore > 0 && attempt.score != null
+            ? Math.round((attempt.score / maxScore) * 100)
+            : 0;
+        return {
+          ...attempt,
+          correct: s.correct,
+          wrong: s.wrong,
+          answered: s.answered,
+          unanswered: totalQuestions - s.answered,
+          time_taken_secs: timeTakenSecs,
+          percentage: pct,
+          max_score: maxScore,
+        };
+      });
+
+      // Enrich questions with normalised options + per-question accuracy
+      const enrichedQuestions = questions.map((q) => ({
+        ...q,
+        options: normalizeOptions(q.options),
+        stats: questionAccuracy[q.id] || { total: 0, correct: 0 },
+      }));
+
+      return res.json({
+        data: {
+          test: {
+            id: test.id,
+            title: test.title,
+            type: test.type,
+            duration_mins: test.duration_mins,
+            batch: test.batches || null,
+          },
+          attempts: augmented,
+          questions: enrichedQuestions,
+          max_score: maxScore,
+          total_questions: totalQuestions,
+        },
+      });
+    } catch (err) {
+      return next(err);
+    }
+  }
+);
+
 // GET /api/tests/:id — test with questions
 router.get("/:id", authenticate, async (req, res, next) => {
   try {

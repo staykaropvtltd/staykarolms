@@ -302,6 +302,9 @@ export const deleteTest = (testId: string) =>
 export const getTestAttempts = (testId: string) =>
   apiFetch(`/api/tests/${testId}/attempts`);
 
+export const getTestAnalytics = (testId: string) =>
+  apiFetch(`/api/tests/${testId}/analytics`);
+
 export const updateTestQuestion = (
   testId: string,
   qId: string,

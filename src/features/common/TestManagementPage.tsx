@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { TestAnalyticsModal } from "./TestAnalyticsModal";
 import { motion, AnimatePresence } from "motion/react";
 import {
   Plus, Search, ClipboardList, Clock, Calendar, CheckCircle2,
@@ -783,7 +784,7 @@ function AllTestsTab() {
         />
       )}
       {resultsTest && (
-        <TestResultsModal
+        <TestAnalyticsModal
           test={resultsTest}
           onClose={() => setResultsTest(null)}
         />
