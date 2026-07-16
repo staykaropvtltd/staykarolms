@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { TestAnalyticsModal } from "./TestAnalyticsModal";
-import { QuestionImportModal, type ParsedQuestion } from "./QuestionImportModal";
+import { UniversalImportModal, type ParsedQuestion } from "./UniversalImportModal";
 import { motion, AnimatePresence } from "motion/react";
 import {
   Plus, Search, ClipboardList, Clock, Calendar, CheckCircle2,
@@ -377,7 +377,7 @@ function EditTestModal({ test, onClose, onSaved }: { test: any; onClose: () => v
           {/* ── Questions section ── */}
           <section>
             {showImport && (
-              <QuestionImportModal
+              <UniversalImportModal
                 testId={test.id}
                 onClose={() => setShowImport(false)}
                 onImported={() => {
@@ -1128,7 +1128,7 @@ function Step2Questions({ questions, setQuestions, onNext, onPrev }: any) {
   return (
     <div className="space-y-6">
       {showImport && (
-        <QuestionImportModal
+        <UniversalImportModal
           onClose={() => setShowImport(false)}
           onImported={(qs?: ParsedQuestion[]) => {
             if (qs) setQuestions([...questions, ...qs]);

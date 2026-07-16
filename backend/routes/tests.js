@@ -525,9 +525,14 @@ router.post(
 );
 
 // POST /api/tests/:id/questions/bulk — batch import (admin/faculty/super-admin)
-// Validates all rows, checks for duplicates against existing questions,
-// inserts in chunks of 500. Rolls back by deleting already-inserted rows
-// if any chunk fails mid-way.
+// Supports all 14 question types. Validates rows, deduplicates, batch-inserts in
+// chunks of 500, and rolls back by deleting already-inserted rows on partial failure.
+const BULK_VALID_TYPES = new Set([
+  "mcq","mcq-multi","true-false","fill-blank","short","long","descriptive",
+  "coding","sql","case-study","matching","ordering","numerical","paragraph",
+]);
+const MCQ_TYPES = new Set(["mcq","mcq-multi","true-false"]);
+
 router.post(
   "/:id/questions/bulk",
   authenticate,
@@ -543,7 +548,7 @@ router.post(
     }
 
     try {
-      // Verify test exists and belongs to this institution
+      // Verify test ownership + tenant isolation
       let testQuery = supabase.from("tests").select("id, institution_id").eq("id", req.params.id);
       if (req.user.role !== "super-admin") {
         testQuery = testQuery.eq("institution_id", req.user.institution_id);
@@ -558,7 +563,7 @@ router.post(
         (existing || []).map(q => (q.question || "").toLowerCase().trim())
       );
 
-      // Highest current order_index so new rows slot in after existing ones
+      // Highest current order_index
       const { data: maxRow } = await supabase
         .from("test_questions").select("order_index").eq("test_id", req.params.id)
         .order("order_index", { ascending: false }).limit(1).maybeSingle();
@@ -574,47 +579,68 @@ router.post(
         const text = (q.question || "").trim();
 
         if (!text) rowErrors.push("Question text is required");
-        else if (text.length < 5) rowErrors.push("Question is too short");
-        else if (text.length > 2000) rowErrors.push("Question exceeds 2000 characters");
+        else if (text.length < 3) rowErrors.push("Question is too short");
+        else if (text.length > 5000) rowErrors.push("Question exceeds 5000 characters");
 
-        const type = (q.type || "mcq").toLowerCase();
-        if (!["mcq", "coding", "short"].includes(type)) {
-          rowErrors.push(`Invalid type "${type}"`);
-        }
+        const rawType = String(q.type || "mcq").toLowerCase().trim();
+        const type = BULK_VALID_TYPES.has(rawType) ? rawType : null;
+        if (!type) rowErrors.push(`Unknown question type "${q.type}"`);
 
         const marksRaw = Number(q.marks);
         const marks = (Number.isInteger(marksRaw) && marksRaw >= 1 && marksRaw <= 100) ? marksRaw : null;
-        if (marks === null) {
-          rowErrors.push("Marks must be an integer 1–100");
-        }
+        if (marks === null) rowErrors.push("Marks must be an integer 1–100");
 
-        if (type === "mcq") {
+        if (type && MCQ_TYPES.has(type)) {
           const opts = Array.isArray(q.options) ? q.options : [];
+          const minOpts = type === "true-false" ? 2 : 4;
           const filled = opts.filter(o => String(o || "").trim()).length;
-          if (filled < 4) rowErrors.push(`MCQ requires 4 non-empty options (got ${filled})`);
-          const ca = parseInt(String(q.correct_answer ?? "0"));
-          if (isNaN(ca) || ca < 0 || ca > 3) rowErrors.push("correct_answer must be 0–3");
-          else if (!String(opts[ca] || "").trim()) rowErrors.push("correct_answer points to empty option");
+          if (filled < minOpts) rowErrors.push(`${type} requires ${minOpts} non-empty options (got ${filled})`);
+          if (type !== "mcq-multi") {
+            const ca = parseInt(String(q.correct_answer ?? "0"), 10);
+            if (isNaN(ca) || ca < 0 || ca >= opts.length) rowErrors.push("correct_answer index out of range");
+            else if (!String(opts[ca] || "").trim()) rowErrors.push("correct_answer points to empty option");
+          }
         }
 
         const textLower = text.toLowerCase();
-        if (text && existingTexts.has(textLower)) {
-          rowErrors.push("Duplicate of an existing question in this test");
-        }
+        if (text && existingTexts.has(textLower)) rowErrors.push("Duplicate of an existing question");
 
         if (rowErrors.length > 0) {
           errors.push({ row: rowNum, question: text.substring(0, 80), errors: rowErrors });
         } else {
-          existingTexts.add(textLower); // prevent within-batch duplication
-          validRows.push({
+          existingTexts.add(textLower);
+
+          const row = {
             test_id: req.params.id,
+            institution_id: test.institution_id,
             question: text,
             type,
-            options: type === "mcq" ? (q.options || []).map(o => String(o).trim()) : null,
-            correct_answer: type === "mcq" ? String(q.correct_answer ?? "0") : null,
             marks,
             order_index: nextOrder++,
-          });
+          };
+
+          // Options: store for all types that have them
+          if (Array.isArray(q.options) && q.options.length) {
+            row.options = q.options.map(o => String(o || "").trim());
+          } else {
+            row.options = null;
+          }
+
+          // Correct answer
+          if (q.correct_answer !== undefined && q.correct_answer !== null) {
+            row.correct_answer = String(q.correct_answer);
+          } else {
+            row.correct_answer = null;
+          }
+
+          // Optional enrichment fields (graceful — DB may not have these columns yet)
+          if (q.topic) row.topic = String(q.topic).trim().substring(0, 200);
+          if (q.explanation) row.explanation = String(q.explanation).substring(0, 2000);
+          if (q.difficulty && ["easy","medium","hard"].includes(q.difficulty)) row.difficulty = q.difficulty;
+          if (Array.isArray(q.tags) && q.tags.length) row.tags = q.tags.slice(0, 10).map(t => String(t).trim());
+          if (q.metadata && typeof q.metadata === "object") row.metadata = q.metadata;
+
+          validRows.push(row);
         }
       });
 
@@ -640,11 +666,13 @@ router.post(
       }
 
       if (insertError) {
-        // Rollback any rows inserted before the failure
         if (insertedIds.length > 0) {
           await supabase.from("test_questions").delete().in("id", insertedIds);
         }
-        return res.status(400).json({ error: "Import failed: " + insertError.message, data: { inserted: 0, skipped: errors.length, errors } });
+        return res.status(400).json({
+          error: "Import failed: " + insertError.message,
+          data: { inserted: 0, skipped: errors.length, errors },
+        });
       }
 
       // Audit log (non-blocking)

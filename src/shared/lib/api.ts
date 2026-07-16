@@ -349,12 +349,67 @@ export const bulkImportQuestions = (
     options?: string[];
     correct_answer?: string;
     marks?: number;
+    topic?: string;
+    explanation?: string;
+    difficulty?: string;
+    tags?: string[];
+    metadata?: Record<string, unknown>;
   }>
 ) =>
   apiFetch(`/api/tests/${testId}/questions/bulk`, {
     method: "POST",
     body: JSON.stringify({ questions }),
   });
+
+// ── Universal Import ──────────────────────────────────────────────────────────
+
+/** Upload any supported file to the backend for server-side parsing. */
+export const parseImportFile = async (file: File): Promise<ApiResponse<any>> => {
+  const token = _cachedToken;
+  const formData = new FormData();
+  formData.append("file", file);
+  try {
+    const url = `${API_URL}/api/imports/parse`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: formData,
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) return { data: null, error: json.error || `HTTP ${res.status}`, status: res.status };
+    return { data: json.data, error: null, status: res.status };
+  } catch (err) {
+    return { data: null, error: err instanceof Error ? err.message : "Network error" };
+  }
+};
+
+/** Re-parse an Excel file with a different sheet (sends buffered base64). */
+export const reParseExcelSheet = (buffer: string, filename: string, sheet: string) =>
+  apiFetch("/api/imports/parse/sheet", {
+    method: "POST",
+    body: JSON.stringify({ buffer, filename, sheet }),
+  });
+
+/** Record a completed import in the history log. */
+export const createImportJob = (payload: {
+  test_id?: string;
+  file_name: string;
+  file_type: string;
+  file_size: number;
+  total_questions: number;
+  inserted: number;
+  skipped: number;
+  failed_count: number;
+  error_log: unknown[];
+}) =>
+  apiFetch("/api/imports/jobs", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+
+/** Get import history for the institution. */
+export const getImportJobs = (limit = 50) =>
+  apiFetch(`/api/imports/jobs?limit=${limit}`);
 
 // ── Attempts ─────────────────────────────────────────────────────────────────
 

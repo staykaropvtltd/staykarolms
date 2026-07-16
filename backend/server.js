@@ -257,6 +257,8 @@ app.use("/api/submissions", require("./routes/submissions"));
 app.use("/api/audit-logs", require("./routes/auditLogs"));
 app.use("/api/support-tickets", require("./routes/supportTickets"));
 app.use("/api/institutions", readLimiter, require("./routes/institutions"));
+// Import route must come before express.json() body-size limit applies to multipart
+app.use("/api/imports", require("./routes/imports"));
 // ── 404 ─────────────────────────────────────────────────────
 app.use((_req, res) => {
   res.status(404).json({ error: "Not found" });
