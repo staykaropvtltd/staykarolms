@@ -2,9 +2,9 @@ import { useState, useRef, useCallback } from "react";
 import {
   Upload, X, CheckCircle2, AlertCircle, Download, Loader2,
   ChevronLeft, ChevronRight, Trash2, FileSpreadsheet, FileText, FileJson,
-  TriangleAlert,
+  TriangleAlert, ArrowRight,
 } from "lucide-react";
-import { bulkImportQuestions } from "@/shared/lib/api";
+import { bulkImportQuestions, parseImportFile } from "@/shared/lib/api";
 import { toast } from "sonner";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -33,17 +33,19 @@ interface ParseResult {
 const PAGE_SIZE = 25;
 const VALID_TYPES = ["mcq", "coding", "short"] as const;
 
-// Column header aliases → internal field names
+// Column header aliases → internal field names (must match backend import-parser.js)
 const COL_ALIASES: Record<string, string> = {
   type: "type", question_type: "type",
-  question: "question", question_text: "question",
+  question: "question", question_text: "question", text: "question",
+  // Single-letter option columns (e.g. CSV header row: question,a,b,c,d,correct_answer,marks)
+  a: "opt0", b: "opt1", c: "opt2", d: "opt3",
   option_a: "opt0", option_1: "opt0", opta: "opt0",
   option_b: "opt1", option_2: "opt1", optb: "opt1",
   option_c: "opt2", option_3: "opt2", optc: "opt2",
   option_d: "opt3", option_4: "opt3", optd: "opt3",
-  correct_answer: "correct_answer", answer: "correct_answer", correct: "correct_answer",
-  marks: "marks", score: "marks", points: "marks",
-  topic: "topic", category: "topic",
+  correct_answer: "correct_answer", answer: "correct_answer", correct: "correct_answer", key: "correct_answer",
+  marks: "marks", score: "marks", points: "marks", mark: "marks",
+  topic: "topic", category: "topic", section: "topic",
 };
 
 // ── Utility functions ──────────────────────────────────────────────────────────
@@ -314,15 +316,16 @@ interface Props {
 
 type Step = "upload" | "preview" | "done";
 type TabFilter = "all" | "valid" | "errors";
+type ProgressStage = "uploading" | "parsing" | "done" | null;
 
 export function QuestionImportModal({ testId, onClose, onImported }: Props) {
   const [step, setStep] = useState<Step>("upload");
   const [isDragging, setIsDragging] = useState(false);
   const [parsing, setParsing] = useState(false);
+  const [progressStage, setProgressStage] = useState<ProgressStage>(null);
   const [rows, setRows] = useState<ParsedQuestion[]>([]);
   const [sheetNames, setSheetNames] = useState<string[]>([]);
   const [activeSheet, setActiveSheet] = useState("");
-  const [xlsxBuffer, setXlsxBuffer] = useState<ArrayBuffer | null>(null);
   const [filename, setFilename] = useState("");
   const [fileErrors, setFileErrors] = useState<string[]>([]);
   const [tab, setTab] = useState<TabFilter>("all");
@@ -348,26 +351,35 @@ export function QuestionImportModal({ testId, onClose, onImported }: Props) {
     if (!result.fileErrors.length && result.rows.length > 0) setStep("preview");
   }, []);
 
+  // ── Server-side parsing (single code path for all file types) ────────────────
   const processFile = useCallback(async (file: File) => {
     setParsing(true);
+    setProgressStage("uploading");
     setFilename(file.name);
+    setFileErrors([]);
+    setRows([]);
     try {
-      const ext = file.name.split(".").pop()?.toLowerCase();
-      let result: ParseResult;
-      if (ext === "xlsx" || ext === "xls") {
-        const buf = await file.arrayBuffer();
-        setXlsxBuffer(buf);
-        result = await parseExcelFile(buf);
-      } else if (ext === "json") {
-        result = parseJSONFile(await file.text());
-      } else {
-        result = parseCSVFile(await file.text());
+      setProgressStage("parsing");
+      const { data, error } = await parseImportFile(file);
+      if (error || !data) {
+        setFileErrors([error ?? "Failed to parse file. Please check the file format."]);
+        setParsing(false);
+        setProgressStage(null);
+        return;
       }
+      // Server returns ParseResult-compatible shape
+      const result: ParseResult = {
+        rows: (data.rows ?? []) as ParsedQuestion[],
+        fileErrors: data.fileErrors ?? [],
+        sheetNames: data.sheetNames ?? [],
+        activeSheet: data.activeSheet ?? "",
+      };
       applyResult(result);
     } catch (e: any) {
       setFileErrors([`Could not read file: ${e.message}`]);
     }
     setParsing(false);
+    setProgressStage(null);
   }, [applyResult]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
@@ -377,11 +389,13 @@ export function QuestionImportModal({ testId, onClose, onImported }: Props) {
     if (f) processFile(f);
   }, [processFile]);
 
+  // Sheet switching: re-upload with sheet parameter (re-parse from same file)
   const handleSheetChange = async (sheet: string) => {
-    if (!xlsxBuffer) return;
-    setParsing(true);
-    applyResult(await parseExcelFile(xlsxBuffer, sheet));
-    setParsing(false);
+    if (!rows.length) return;
+    // Re-parse by hitting the server with the already-uploaded file name
+    // For now, display a notice since re-parsing requires re-upload
+    setActiveSheet(sheet);
+    toast.info(`To switch sheets, please re-upload the file and select "${sheet}" from the sheet selector.`);
   };
 
   const deleteRow = (id: string) => {
@@ -418,15 +432,17 @@ export function QuestionImportModal({ testId, onClose, onImported }: Props) {
       question: r.question,
       type: r.type,
       options: r.type === "mcq" ? Array.from(r.options) : undefined,
+      // correct_answer is already a normalized numeric-index string from the server parser
       correct_answer: r.type === "mcq" ? r.correct_answer : undefined,
       marks: r.marks,
+      topic: r.topic || undefined,
     }));
 
     const { data, error } = await bulkImportQuestions(testId, payload);
     setImporting(false);
 
     if (error) {
-      toast.error(error);
+      toast.error(`Import failed: ${error}`);
       return;
     }
 
@@ -494,15 +510,40 @@ export function QuestionImportModal({ testId, onClose, onImported }: Props) {
               onDragOver={e => { e.preventDefault(); setIsDragging(true); }}
               onDragLeave={() => setIsDragging(false)}
               onDrop={handleDrop}
-              onClick={() => fileRef.current?.click()}
-              className={`border-2 border-dashed rounded-xl p-10 text-center cursor-pointer transition-colors ${
-                isDragging ? "border-primary bg-primary/5" : "border-border hover:border-primary/50 hover:bg-muted/30"
+              onClick={() => !parsing && fileRef.current?.click()}
+              className={`border-2 border-dashed rounded-xl p-10 text-center transition-colors ${
+                parsing ? "cursor-not-allowed opacity-70" :
+                isDragging ? "border-primary bg-primary/5 cursor-copy" : "border-border hover:border-primary/50 hover:bg-muted/30 cursor-pointer"
               }`}
             >
               {parsing ? (
-                <div className="flex flex-col items-center gap-2 text-muted-foreground">
-                  <Loader2 className="w-8 h-8 animate-spin" />
-                  <p className="text-sm font-medium">Parsing {filename}…</p>
+                <div className="flex flex-col items-center gap-3 text-muted-foreground">
+                  <Loader2 className="w-8 h-8 animate-spin text-primary" />
+                  <div className="space-y-1">
+                    <p className="text-sm font-semibold text-foreground">
+                      {progressStage === "uploading" ? "Uploading file…" : "Parsing questions…"}
+                    </p>
+                    <p className="text-xs text-muted-foreground">{filename}</p>
+                  </div>
+                  {/* Progress steps */}
+                  <div className="flex items-center gap-2 mt-2">
+                    {(["Uploading", "Parsing", "Preview"] as const).map((stage, i) => {
+                      const stageKey = stage.toLowerCase();
+                      const active = progressStage === stageKey || (progressStage === "parsing" && i === 1) || (progressStage === "uploading" && i === 0);
+                      const done = (progressStage === "parsing" && i === 0);
+                      return (
+                        <>
+                          <div key={stage} className={`flex items-center gap-1 text-xs font-semibold ${
+                            done ? "text-green-500" : active ? "text-primary" : "text-muted-foreground/50"
+                          }`}>
+                            {done ? <CheckCircle2 className="w-3 h-3" /> : <div className={`w-2 h-2 rounded-full ${ active ? "bg-primary" : "bg-muted-foreground/30"}`} />}
+                            {stage}
+                          </div>
+                          {i < 2 && <ArrowRight className="w-3 h-3 text-muted-foreground/30" />}
+                        </>
+                      );
+                    })}
+                  </div>
                 </div>
               ) : (
                 <>
@@ -510,7 +551,7 @@ export function QuestionImportModal({ testId, onClose, onImported }: Props) {
                   <p className="text-sm font-semibold text-foreground">
                     {isDragging ? "Drop to import" : "Click or drag a file here"}
                   </p>
-                  <p className="text-xs text-muted-foreground mt-1">Accepts .xlsx, .csv, .json</p>
+                  <p className="text-xs text-muted-foreground mt-1">Accepts .xlsx, .xls, .csv, .json</p>
                 </>
               )}
               <input
@@ -539,12 +580,13 @@ export function QuestionImportModal({ testId, onClose, onImported }: Props) {
                 Column reference ▸
               </summary>
               <div className="mt-2 p-3 bg-muted/30 rounded-lg font-mono space-y-1">
-                <p><span className="text-foreground font-bold">type</span> — mcq / coding / short</p>
+                <p><span className="text-foreground font-bold">type</span> — mcq / coding / short (default: mcq)</p>
                 <p><span className="text-foreground font-bold">question</span> — question text (required)</p>
-                <p><span className="text-foreground font-bold">option_a … option_d</span> — MCQ choices</p>
-                <p><span className="text-foreground font-bold">correct_answer</span> — a/b/c/d or 0/1/2/3</p>
-                <p><span className="text-foreground font-bold">marks</span> — integer 1–100 (default 1)</p>
+                <p><span className="text-foreground font-bold">a, b, c, d</span> — MCQ options (also: option_a … option_d)</p>
+                <p><span className="text-foreground font-bold">correct_answer</span> — A/B/C/D or 0/1/2/3</p>
+                <p><span className="text-foreground font-bold">marks</span> — integer 1–100 (default: 1)</p>
                 <p><span className="text-foreground font-bold">topic</span> — optional category label</p>
+                <p className="text-muted-foreground/70 pt-1">Example CSV: question,a,b,c,d,correct_answer,marks</p>
               </div>
             </details>
           </div>

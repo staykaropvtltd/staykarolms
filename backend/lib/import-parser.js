@@ -62,11 +62,13 @@ function normKey(s) {
 function normalizeAnswer(val, type) {
   if (val === undefined || val === null || val === "") return type === "mcq" ? "0" : "";
   const s = String(val).toLowerCase().trim();
-  if (type === "mcq" || type === "true-false") {
-    const li = ["a","b","c","d"].indexOf(s.replace(/[.\)]/g,""));
+  if (type === "mcq" || type === "mcq-multi" || type === "true-false") {
+    // Strip punctuation like "A." "B)" "C:" and spaces before matching
+    const clean = s.replace(/[.)\]:\s]/g, "");
+    const li = ["a","b","c","d"].indexOf(clean);
     if (li >= 0) return String(li);
     const n = parseInt(s, 10);
-    if (!isNaN(n) && n >= 0 && n <= 3) return String(n);
+    if (!isNaN(n) && n >= 0 && n <= 9) return String(n);
     // "True"/"False" for true-false
     if (s === "true") return "0";
     if (s === "false") return "1";

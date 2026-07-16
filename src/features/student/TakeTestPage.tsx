@@ -126,16 +126,32 @@ export function TakeTestPage() {
   // ── Result Screen ─────────────────────────────────────────────────────────
   if (isSubmitted && result) {
     const pct = result.maxScore > 0 ? Math.round((result.score / result.maxScore) * 100) : 0;
-    const passed = pct >= 40;
+    const passThreshold = test.pass_percentage ?? 40;
+    const passed = pct >= passThreshold;
     return (
       <div className="fixed inset-0 z-50 bg-background flex flex-col items-center justify-center p-4">
         <div className="max-w-2xl w-full bg-card border rounded-2xl p-8 text-center space-y-6 shadow-lg">
-          <div className={`w-24 h-24 mx-auto rounded-full flex items-center justify-center ${passed ? "bg-green-500/10 text-green-500" : "bg-orange-500/10 text-orange-500"}`}>
+          {/* Pass/Fail Badge */}
+          <div className={`w-24 h-24 mx-auto rounded-full flex items-center justify-center ${
+            passed ? "bg-green-500/10 text-green-500" : "bg-red-500/10 text-red-500"
+          }`}>
             <CheckCircle2 className="w-12 h-12" />
           </div>
+
+          {/* Pass/Fail label */}
           <div>
+            <span className={`inline-block px-5 py-1.5 rounded-full text-sm font-black tracking-widest uppercase mb-3 ${
+              passed
+                ? "bg-green-500/15 text-green-600 border border-green-500/30"
+                : "bg-red-500/15 text-red-600 border border-red-500/30"
+            }`}>
+              {passed ? "✓ PASS" : "✗ FAIL"}
+            </span>
             <h1 className="text-3xl font-bold mb-2">Test Submitted!</h1>
             <p className="text-muted-foreground">You completed <span className="font-semibold text-foreground">{test.title}</span></p>
+            {!passed && (
+              <p className="text-xs text-muted-foreground mt-1">Passing score: {passThreshold}%</p>
+            )}
           </div>
           <div className="grid grid-cols-3 gap-4 py-6 border-y">
             <div>
@@ -144,7 +160,7 @@ export function TakeTestPage() {
             </div>
             <div>
               <p className="text-sm text-muted-foreground mb-1">Percentage</p>
-              <p className={`text-3xl font-black ${passed ? "text-green-500" : "text-orange-500"}`}>{pct}%</p>
+              <p className={`text-3xl font-black ${passed ? "text-green-500" : "text-red-500"}`}>{pct}%</p>
             </div>
             <div>
               <p className="text-sm text-muted-foreground mb-1">Time Taken</p>

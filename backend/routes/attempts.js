@@ -17,6 +17,23 @@ function normalizeOptions(options) {
   return options == null ? null : [];
 }
 
+/**
+ * Normalize a correct_answer value to a numeric index string so grading always
+ * compares apples-to-apples ("0"==="0" rather than "0"==="A").
+ * Handles: "A"/"B"/"C"/"D" (case-insensitive), "a"/"b"/"c"/"d", digit strings, integers.
+ */
+function normalizeCorrectAnswer(val) {
+  if (val === undefined || val === null) return null;
+  const s = String(val).trim();
+  if (!s) return null;
+  const lower = s.toLowerCase().replace(/[.)\s]/g, "");
+  const letterIdx = ["a", "b", "c", "d"].indexOf(lower);
+  if (letterIdx >= 0) return String(letterIdx);
+  const n = parseInt(s, 10);
+  if (!isNaN(n) && n >= 0 && n <= 9) return String(n);
+  return s;
+}
+
 // POST /api/attempts/start — student starts a test
 router.post("/start", authenticate, requireRole("student"), async (req, res, next) => {
   const { test_id } = req.body;
@@ -210,8 +227,14 @@ router.post("/:id/submit", authenticate, requireRole("student"), async (req, res
       const question = ans.test_questions;
       let isCorrect = false;
       let marksAwarded = 0;
-      if (question?.type === "mcq" && question.correct_answer) {
-        isCorrect = ans.answer?.trim() === question.correct_answer?.trim();
+      const mcqTypes = ["mcq", "mcq-multi", "true-false"];
+      if (mcqTypes.includes(question?.type) && question?.correct_answer != null) {
+        // Normalize both sides so "A"==="0" and "0"==="0" both work
+        const studentAnswer = normalizeCorrectAnswer(ans.answer);
+        const correctAnswer = normalizeCorrectAnswer(question.correct_answer);
+        isCorrect = studentAnswer !== null &&
+                    studentAnswer !== "" &&
+                    studentAnswer === correctAnswer;
         marksAwarded = isCorrect ? (question.marks || 1) : 0;
       }
       totalScore += marksAwarded;

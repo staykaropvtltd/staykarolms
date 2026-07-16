@@ -18,6 +18,29 @@ function normalizeOptions(options) {
   return options == null ? null : [];
 }
 
+/**
+ * Normalize a correct_answer value to a zero-based numeric index string.
+ * Accepts: "A"/"B"/"C"/"D" (case-insensitive), 0-based numbers 0-9, or already-correct strings.
+ * Examples: "A" → "0", "b" → "1", "C" → "2", "D" → "3", 2 → "2", "2" → "2".
+ * For non-MCQ types the value is returned as-is (trimmed string).
+ */
+function normalizeCorrectAnswer(val, type) {
+  if (val === undefined || val === null) return null;
+  const s = String(val).trim();
+  if (!s) return null;
+  // Only convert letter→index for MCQ-family types
+  const isChoiceBased = !type || type === "mcq" || type === "mcq-multi" || type === "true-false";
+  if (isChoiceBased) {
+    const lower = s.toLowerCase().replace(/[.)]/g, "");
+    const letterIdx = ["a", "b", "c", "d"].indexOf(lower);
+    if (letterIdx >= 0) return String(letterIdx);
+    // If it's already a digit string, keep it
+    const n = parseInt(s, 10);
+    if (!isNaN(n) && n >= 0 && n <= 9) return String(n);
+  }
+  return s;
+}
+
 // GET /api/tests — list by institution + optional batch filter
 router.get("/", authenticate, async (req, res, next) => {
   try {
@@ -495,7 +518,8 @@ router.post(
   authenticate,
   requireRole("admin", "faculty", "super-admin"),
   async (req, res, next) => {
-    const { question, type, options, correct_answer, marks, order_index } = req.body;
+    const { question, type, options, marks, order_index } = req.body;
+    const correct_answer = normalizeCorrectAnswer(req.body.correct_answer, type);
 
     if (!question || !type) {
       return res.status(400).json({ error: "question and type are required" });
@@ -626,9 +650,9 @@ router.post(
             row.options = null;
           }
 
-          // Correct answer
+          // Correct answer — always normalize to numeric index before storing
           if (q.correct_answer !== undefined && q.correct_answer !== null) {
-            row.correct_answer = String(q.correct_answer);
+            row.correct_answer = normalizeCorrectAnswer(q.correct_answer, type);
           } else {
             row.correct_answer = null;
           }
