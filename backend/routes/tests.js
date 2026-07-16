@@ -463,10 +463,12 @@ router.get("/:id", authenticate, async (req, res, next) => {
         return res.status(404).json({ error: "Test not found" });
       }
 
-      const sanitizedQuestions = (data.test_questions || []).map(({ correct_answer, ...question }) => ({
-        ...question,
-        options: normalizeOptions(question.options),
-      }));
+      const sanitizedQuestions = (data.test_questions || [])
+        .sort((a, b) => (a.order_index ?? 0) - (b.order_index ?? 0))
+        .map(({ correct_answer, ...question }) => ({
+          ...question,
+          options: normalizeOptions(question.options),
+        }));
       return res.json({
         data: {
           ...data,
@@ -475,10 +477,12 @@ router.get("/:id", authenticate, async (req, res, next) => {
       });
     }
 
-    const normalizedQuestions = (data.test_questions || []).map((q) => ({
-      ...q,
-      options: normalizeOptions(q.options),
-    }));
+    const normalizedQuestions = (data.test_questions || [])
+      .sort((a, b) => (a.order_index ?? 0) - (b.order_index ?? 0))
+      .map((q) => ({
+        ...q,
+        options: normalizeOptions(q.options),
+      }));
     return res.json({ data: { ...data, test_questions: normalizedQuestions } });
   } catch (err) {
     return next(err);

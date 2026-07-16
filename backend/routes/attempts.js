@@ -269,7 +269,7 @@ router.get("/:id/result", authenticate, async (req, res, next) => {
         tests:test_id ( title, type, duration_mins, institution_id ),
         test_answers (
           *,
-          test_questions ( question, type, correct_answer, marks, options )
+          test_questions ( question, type, correct_answer, marks, options, order_index )
         )
       `)
       .eq("id", req.params.id)
@@ -300,15 +300,17 @@ router.get("/:id/result", authenticate, async (req, res, next) => {
       } catch (_) {}
     }
 
-    // Normalize options on each answer's embedded question
+    // Normalize options and sort answers by question order_index
     const normalizedAttempt = {
       ...attempt,
-      test_answers: (attempt.test_answers || []).map((ans) => ({
-        ...ans,
-        test_questions: ans.test_questions
-          ? { ...ans.test_questions, options: normalizeOptions(ans.test_questions.options) }
-          : ans.test_questions,
-      })),
+      test_answers: (attempt.test_answers || [])
+        .sort((a, b) => (a.test_questions?.order_index ?? 0) - (b.test_questions?.order_index ?? 0))
+        .map((ans) => ({
+          ...ans,
+          test_questions: ans.test_questions
+            ? { ...ans.test_questions, options: normalizeOptions(ans.test_questions.options) }
+            : ans.test_questions,
+        })),
     };
 
     return res.json({ data: normalizedAttempt });

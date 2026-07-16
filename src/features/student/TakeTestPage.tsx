@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router";
 import { Clock, ChevronLeft, ChevronRight, Flag, CheckCircle2, AlertCircle, Loader2, Code2, AlignLeft } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
-import { getTest, startAttempt, saveAnswer, submitAttempt, getAttemptResult } from "@/shared/lib/api";
+import { getTest, startAttempt, saveAnswer, submitAttempt } from "@/shared/lib/api";
 import { toast } from "sonner";
 
 type AnswerState = Record<string, string>;
@@ -55,23 +55,19 @@ export function TakeTestPage() {
       setIsSubmitted(true);
       toast.info("Time's up! Submitting automatically…");
       const { data: submitData } = await submitAttempt(attemptId, true);
+      const totalMarks = (test.test_questions || []).reduce((sum: number, q: any) => sum + (q.marks || 1), 0);
       if (submitData) {
-        const { data: resultData } = await getAttemptResult(attemptId);
-        if (resultData) {
-          setResult({
-            score: resultData.score ?? 0,
-            maxScore: resultData.max_score ?? questions.reduce((sum: number, q: any) => sum + (q.marks || 1), 0),
-            timeTaken: (test.duration_mins || 30) * 60,
-          });
-          return;
-        }
+        setResult({
+          score:      submitData.score ?? 0,
+          maxScore:   totalMarks,
+          correct:    submitData.correct_count ?? 0,
+          wrong:      submitData.wrong_count ?? 0,
+          unanswered: (test.test_questions || []).length - (submitData.answered_count ?? 0),
+          timeTaken:  (test.duration_mins || 30) * 60,
+        });
+      } else {
+        setResult({ score: 0, maxScore: totalMarks, correct: 0, wrong: 0, unanswered: (test.test_questions || []).length, timeTaken: (test.duration_mins || 30) * 60 });
       }
-      let score = 0;
-      const maxScore = questions.reduce((sum: number, q: any) => sum + (q.marks || 1), 0);
-      questions.forEach((q: any) => {
-        if (answers[q.id] !== undefined && answers[q.id] === q.correct_answer) score += (q.marks || 1);
-      });
-      setResult({ score, maxScore, timeTaken: (test.duration_mins || 30) * 60 });
     })();
   }, [timeLeft, isSubmitted, attemptId, test]);
 
@@ -107,26 +103,24 @@ export function TakeTestPage() {
   const handleSubmitFinal = async () => {
     setIsReviewing(false);
     setIsSubmitted(true);
+    const totalMarks = questions.reduce((sum, q) => sum + (q.marks || 1), 0);
+    const timeTaken  = (test.duration_mins || 30) * 60 - timeLeft;
     if (attemptId) {
-      const { data: submitData } = await submitAttempt(attemptId);
+      const { data: submitData, error: submitError } = await submitAttempt(attemptId);
+      if (submitError) toast.error("Submit failed — your answers were saved.");
       if (submitData) {
-        const { data: resultData } = await getAttemptResult(attemptId);
-        if (resultData) {
-          setResult({
-            score: resultData.score ?? 0,
-            maxScore: resultData.max_score ?? questions.reduce((sum, q) => sum + (q.marks || 1), 0),
-            timeTaken: (test.duration_mins || 30) * 60 - timeLeft,
-          });
-          return;
-        }
+        setResult({
+          score:      submitData.score ?? 0,
+          maxScore:   totalMarks,
+          correct:    submitData.correct_count ?? 0,
+          wrong:      submitData.wrong_count ?? 0,
+          unanswered: questions.length - (submitData.answered_count ?? 0),
+          timeTaken,
+        });
+        return;
       }
     }
-    let score = 0;
-    const maxScore = questions.reduce((sum, q) => sum + (q.marks || 1), 0);
-    questions.forEach((q) => {
-      if (answers[q.id] !== undefined && answers[q.id] === q.correct_answer) score += (q.marks || 1);
-    });
-    setResult({ score, maxScore, timeTaken: (test.duration_mins || 30) * 60 - timeLeft });
+    setResult({ score: 0, maxScore: totalMarks, correct: 0, wrong: 0, unanswered: questions.length, timeTaken });
   };
 
   // ── Result Screen ─────────────────────────────────────────────────────────
@@ -155,6 +149,20 @@ export function TakeTestPage() {
             <div>
               <p className="text-sm text-muted-foreground mb-1">Time Taken</p>
               <p className="text-3xl font-black">{formatTime(result.timeTaken)}</p>
+            </div>
+          </div>
+          <div className="grid grid-cols-3 gap-4">
+            <div className="p-4 rounded-xl border bg-green-500/5 border-green-500/20 text-center">
+              <p className="text-2xl font-black text-green-500">{result.correct ?? 0}</p>
+              <p className="text-xs text-muted-foreground mt-1">Correct</p>
+            </div>
+            <div className="p-4 rounded-xl border bg-red-500/5 border-red-500/20 text-center">
+              <p className="text-2xl font-black text-red-500">{result.wrong ?? 0}</p>
+              <p className="text-xs text-muted-foreground mt-1">Wrong</p>
+            </div>
+            <div className="p-4 rounded-xl border bg-muted text-center">
+              <p className="text-2xl font-black text-muted-foreground">{result.unanswered ?? 0}</p>
+              <p className="text-xs text-muted-foreground mt-1">Unanswered</p>
             </div>
           </div>
           <button onClick={() => navigate("/student/dashboard")} className="w-full py-3 bg-primary text-primary-foreground font-bold rounded-xl hover:opacity-90 transition-opacity">

@@ -355,7 +355,9 @@ function AttemptDetailView({
     });
   }, [attempt.id]);
 
-  const answers: any[] = detail?.test_answers ?? [];
+  const answers: any[] = (detail?.test_answers ?? []).slice().sort(
+    (a: any, b: any) => (a.test_questions?.order_index ?? 0) - (b.test_questions?.order_index ?? 0)
+  );
   const totalPossible = answers.reduce((s: number, a: any) => s + (a.test_questions?.marks ?? 0), 0);
   const score       = detail?.score ?? 0;
   const pct         = totalPossible > 0 ? Math.round((score / totalPossible) * 100) : 0;

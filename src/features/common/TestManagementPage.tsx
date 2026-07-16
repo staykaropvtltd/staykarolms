@@ -451,7 +451,9 @@ function AttemptDetailModal({
 }: {
   attempt: any; detail: any; loading: boolean; onBack: () => void; onClose: () => void;
 }) {
-  const answers: any[] = detail?.test_answers ?? [];
+  const answers: any[] = (detail?.test_answers ?? []).slice().sort(
+    (a: any, b: any) => (a.test_questions?.order_index ?? 0) - (b.test_questions?.order_index ?? 0)
+  );
   const totalPossible = answers.reduce((s, a) => s + (a.test_questions?.marks ?? 0), 0);
   const score = detail?.score ?? 0;
   const pct = totalPossible > 0 ? Math.round((score / totalPossible) * 100) : 0;
@@ -1088,6 +1090,18 @@ function Step1Details({ formData, setFormData, onNext, batches = [] }: any) {
 
 // ── CSV / JSON question parser ─────────────────────────────────────────────────
 
+// Normalize correct_answer to a 0-based string index.
+// Accepts: numeric index (0-3), letter ("a"-"d"), or option text (ignored → "0").
+function normalizeCorrectAnswer(val: unknown): string {
+  if (val === undefined || val === null) return "0";
+  const s = String(val).toLowerCase().trim();
+  const letterIdx = ["a", "b", "c", "d"].indexOf(s);
+  if (letterIdx >= 0) return String(letterIdx);
+  const n = parseInt(s);
+  if (!isNaN(n) && n >= 0 && n <= 3) return String(n);
+  return "0";
+}
+
 function parseQuestionsFile(text: string, filename: string): { questions: any[]; errors: string[] } {
   const questions: any[] = [];
   const errors: string[] = [];
@@ -1100,7 +1114,7 @@ function parseQuestionsFile(text: string, filename: string): { questions: any[];
         questions.push({
           id: Date.now().toString() + i, type: q.type || "mcq", question: q.question,
           marks: Number(q.marks) || 1, options: q.options || ["", "", "", ""],
-          correct_answer: q.correct_answer !== undefined ? String(q.correct_answer) : "0",
+          correct_answer: normalizeCorrectAnswer(q.correct_answer),
         });
       });
     } catch { errors.push("Invalid JSON file"); }
