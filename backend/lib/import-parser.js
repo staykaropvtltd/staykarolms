@@ -286,15 +286,34 @@ async function parseExcel(buffer, sheetName) {
   const ws = wb.Sheets[active];
   if (!ws) return { rows: [], fileErrors: [`Sheet "${active}" not found`], sheetNames, activeSheet: active };
 
-  const jsonRows = XLSX.utils.sheet_to_json(ws, { defval: "", raw: false });
-  if (!jsonRows.length) return { rows: [], fileErrors: [`Sheet "${active}" is empty`], sheetNames, activeSheet: active };
+  // Read as raw arrays so we can auto-detect the header row.
+  // Some sheets have a title/banner row above the real column headers.
+  const rawRows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "", raw: false });
+  if (!rawRows.length) return { rows: [], fileErrors: [`Sheet "${active}" is empty`], sheetNames, activeSheet: active };
+
+  // Find the first row (within the first 5) where ≥2 cells match COL_ALIASES.
+  // This handles files that have one or more title rows before the real headers.
+  let headerRowIdx = 0;
+  for (let i = 0; i < Math.min(5, rawRows.length); i++) {
+    const matches = rawRows[i].filter(cell => COL_ALIASES[normKey(String(cell || ""))]).length;
+    if (matches >= 2) { headerRowIdx = i; break; }
+  }
+
+  const headerCells = rawRows[headerRowIdx];
+  const colMap = {};
+  headerCells.forEach((h, idx) => {
+    const alias = COL_ALIASES[normKey(String(h || ""))];
+    if (alias && !(idx in colMap)) colMap[idx] = alias;
+  });
+
+  const dataRows = rawRows.slice(headerRowIdx + 1).filter(row => row.some(c => String(c || "").trim()));
+  if (!dataRows.length) return { rows: [], fileErrors: [`Sheet "${active}" has no data rows`], sheetNames, activeSheet: active };
 
   const seenTexts = new Set();
-  const rows = jsonRows.map((raw, i) => {
+  const rows = dataRows.map((cols, i) => {
     const obj = {};
-    Object.entries(raw).forEach(([k, v]) => {
-      const alias = COL_ALIASES[normKey(k)];
-      if (alias && !obj[alias]) obj[alias] = String(v || "").trim();
+    Object.entries(colMap).forEach(([ci, key]) => {
+      if (!obj[key]) obj[key] = String(cols[Number(ci)] || "").trim();
     });
     return buildStructuredRow(obj, i + 1, seenTexts);
   });
