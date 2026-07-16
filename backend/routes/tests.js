@@ -3,6 +3,21 @@ const supabase = require("../lib/supabase");
 const authenticate = require("../middleware/auth");
 const { requireRole } = require("../middleware/roleGuard");
 
+// options stored as a JSON-encoded string inside jsonb must be parsed back to an array
+function normalizeOptions(options) {
+  if (Array.isArray(options)) return options;
+  if (typeof options === "string") {
+    try {
+      const parsed = JSON.parse(options);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      console.warn("[tests] malformed options value:", options);
+      return [];
+    }
+  }
+  return options == null ? null : [];
+}
+
 // GET /api/tests — list by institution + optional batch filter
 router.get("/", authenticate, async (req, res, next) => {
   try {
@@ -158,7 +173,10 @@ router.get("/:id", authenticate, async (req, res, next) => {
         return res.status(404).json({ error: "Test not found" });
       }
 
-      const sanitizedQuestions = (data.test_questions || []).map(({ correct_answer, ...question }) => question);
+      const sanitizedQuestions = (data.test_questions || []).map(({ correct_answer, ...question }) => ({
+        ...question,
+        options: normalizeOptions(question.options),
+      }));
       return res.json({
         data: {
           ...data,
@@ -167,7 +185,11 @@ router.get("/:id", authenticate, async (req, res, next) => {
       });
     }
 
-    return res.json({ data });
+    const normalizedQuestions = (data.test_questions || []).map((q) => ({
+      ...q,
+      options: normalizeOptions(q.options),
+    }));
+    return res.json({ data: { ...data, test_questions: normalizedQuestions } });
   } catch (err) {
     return next(err);
   }

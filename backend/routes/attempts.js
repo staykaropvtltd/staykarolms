@@ -3,6 +3,20 @@ const supabase = require("../lib/supabase");
 const authenticate = require("../middleware/auth");
 const { requireRole } = require("../middleware/roleGuard");
 
+function normalizeOptions(options) {
+  if (Array.isArray(options)) return options;
+  if (typeof options === "string") {
+    try {
+      const parsed = JSON.parse(options);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      console.warn("[attempts] malformed options value:", options);
+      return [];
+    }
+  }
+  return options == null ? null : [];
+}
+
 // POST /api/attempts/start — student starts a test
 router.post("/start", authenticate, requireRole("student"), async (req, res, next) => {
   const { test_id } = req.body;
@@ -252,7 +266,18 @@ router.get("/:id/result", authenticate, async (req, res, next) => {
       }
     }
 
-    return res.json({ data: attempt });
+    // Normalize options on each answer's embedded question
+    const normalizedAttempt = {
+      ...attempt,
+      test_answers: (attempt.test_answers || []).map((ans) => ({
+        ...ans,
+        test_questions: ans.test_questions
+          ? { ...ans.test_questions, options: normalizeOptions(ans.test_questions.options) }
+          : ans.test_questions,
+      })),
+    };
+
+    return res.json({ data: normalizedAttempt });
   } catch (err) {
     return next(err);
   }

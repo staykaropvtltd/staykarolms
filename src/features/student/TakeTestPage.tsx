@@ -308,7 +308,7 @@ export function TakeTestPage() {
                   {/* MCQ Options */}
                   {isMCQ && (
                     <div className="space-y-3">
-                      {(currentQ.options || []).map((opt: string, idx: number) => {
+                      {(Array.isArray(currentQ.options) ? currentQ.options : []).map((opt: string, idx: number) => {
                         const isSelected = answers[currentQ.id] === idx.toString();
                         return (
                           <label

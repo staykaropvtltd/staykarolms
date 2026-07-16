@@ -51,6 +51,7 @@ import { CodeEditorPage } from "@/features/student/CodeEditorPage";
 import { CodingTestPage } from "@/features/student/CodingTestPage";
 import { AptitudeTestPage } from "@/features/student/AptitudeTestPage";
 import { TakeTestPage } from "@/features/student/TakeTestPage";
+import { ExamErrorBoundary } from "@/shared/components/ExamErrorBoundary";
 
 // Super-admin pages (company HQ — oversees all institutes)
 import { ClientsPage } from "@/features/super-admin/ClientsPage";
@@ -180,7 +181,7 @@ export const router = createBrowserRouter([
           { path: "code-editor",        element: <CodeEditorPage /> },
           { path: "coding-test",        element: <CodingTestPage userType="student" /> },
           { path: "aptitude-test",      element: <AptitudeTestPage userType="student" /> },
-          { path: "take-test/:testId",  element: <TakeTestPage /> },
+          { path: "take-test/:testId",  element: <ExamErrorBoundary><TakeTestPage /></ExamErrorBoundary> },
           { path: "ai-interviewer",     element: <AiInterviewerPage userType="student" /> },
           { path: "certificates",       element: <CertificatesPage userType="student" /> },
           { path: "calendar",           element: <CalendarPage /> },
