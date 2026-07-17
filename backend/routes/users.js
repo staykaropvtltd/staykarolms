@@ -4,8 +4,13 @@ const authenticate = require("../middleware/auth");
 const { requireRole } = require("../middleware/roleGuard");
 
 // GET /api/users — list users by role + institution
+// Optional query params: ?limit=N&page=N for pagination (default: all up to 2000).
 router.get("/", authenticate, async (req, res, next) => {
   try {
+    const limit  = req.query.limit  ? Math.min(2000, Math.max(1, parseInt(req.query.limit,  10) || 2000)) : 2000;
+    const page   = req.query.page   ? Math.max(1, parseInt(req.query.page,   10) || 1) : 1;
+    const offset = (page - 1) * limit;
+
     let query = supabase
       .from("profiles")
       .select("id, name, email, role, institution_id, avatar_url, created_at");
@@ -18,9 +23,12 @@ router.get("/", authenticate, async (req, res, next) => {
       query = query.eq("role", req.query.role);
     }
 
-    const { data, error } = await query.order("created_at", { ascending: false });
+    const { data, error } = await query
+      .order("created_at", { ascending: false })
+      .range(offset, offset + limit - 1);
+
     if (error) return res.status(400).json({ error: error.message });
-    return res.json({ data });
+    return res.json({ data, meta: { page, limit } });
   } catch (err) {
     return next(err);
   }
@@ -110,51 +118,72 @@ router.post(
     }
 
     const tempPassword = default_password || "Welcome@123";
-    const created = [];
     const failed = [];
 
+    // 1. Validate all inputs up-front (no DB calls)
+    const valid = [];
     for (const s of students) {
       const name = String(s.name || "").trim();
       const email = String(s.email || "").toLowerCase().trim();
-
       if (!name || !email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
         failed.push({ email: email || "unknown", reason: "Invalid name or email" });
-        continue;
+      } else {
+        valid.push({ name, email });
       }
+    }
 
-      try {
-        const { data: authData, error: authError } = await supabase.auth.admin.createUser({
-          email,
-          password: tempPassword,
-          email_confirm: true,
-          user_metadata: { name, role: "student" },
-        });
+    // 2. Create auth users concurrently in batches of 10 to respect Supabase rate limits.
+    //    Each inner batch is fully parallel; outer batches are sequential.
+    const AUTH_BATCH = 10;
+    const authResults = [];
 
-        if (authError) {
-          failed.push({ email, reason: authError.message });
-          continue;
+    for (let i = 0; i < valid.length; i += AUTH_BATCH) {
+      const chunk = valid.slice(i, i + AUTH_BATCH);
+      const results = await Promise.all(
+        chunk.map(async ({ name, email }) => {
+          try {
+            const { data: authData, error: authError } = await supabase.auth.admin.createUser({
+              email,
+              password: tempPassword,
+              email_confirm: true,
+              user_metadata: { name, role: "student" },
+            });
+            if (authError) {
+              failed.push({ email, reason: authError.message });
+              return null;
+            }
+            return { name, email, userId: authData.user.id };
+          } catch (err) {
+            failed.push({ email, reason: err.message });
+            return null;
+          }
+        })
+      );
+      authResults.push(...results.filter(Boolean));
+    }
+
+    // 3. Single batch upsert replaces N individual profile inserts.
+    let created = [];
+    if (authResults.length > 0) {
+      const profileRows = authResults.map(({ name, email, userId }) => ({
+        id: userId,
+        email,
+        name,
+        role: "student",
+        institution_id: req.user.institution_id,
+      }));
+
+      const { data: profiles, error: profileError } = await supabase
+        .from("profiles")
+        .upsert(profileRows)
+        .select();
+
+      if (profileError) {
+        for (const r of authResults) {
+          failed.push({ email: r.email, reason: profileError.message });
         }
-
-        const { data: profile, error: profileError } = await supabase
-          .from("profiles")
-          .upsert({
-            id: authData.user.id,
-            email,
-            name,
-            role: "student",
-            institution_id: req.user.institution_id,
-          })
-          .select()
-          .single();
-
-        if (profileError) {
-          failed.push({ email, reason: profileError.message });
-          continue;
-        }
-
-        created.push(profile);
-      } catch (err) {
-        failed.push({ email, reason: err.message });
+      } else {
+        created = profiles || [];
       }
     }
 

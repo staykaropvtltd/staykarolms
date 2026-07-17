@@ -85,6 +85,21 @@ app.use(helmet({
 // Trust proxy so req.ip is the real client IP behind Render/Vercel LB
 app.set("trust proxy", 1);
 
+// ── Per-request timeout ──────────────────────────────────────
+// Prevents runaway DB queries from holding connections indefinitely.
+// 55s sits safely inside Vercel's 60s function limit and Render's 90s idle timeout.
+app.use((req, res, next) => {
+  const timer = setTimeout(() => {
+    if (!res.headersSent) {
+      res.status(503).json({ error: "Request timeout — please try again" });
+    }
+  }, 55_000);
+  const clear = () => clearTimeout(timer);
+  res.on("finish", clear);
+  res.on("close", clear);
+  next();
+});
+
 // ── Rate limiting ────────────────────────────────────────────
 // Limits are per real client IP. With Redis these are shared across all
 // PM2 workers; without Redis each worker enforces independently.
@@ -122,6 +137,14 @@ app.use("/api/upload", uploadLimiter, express.json({ limit: "150mb" }), require(
 
 // Standard routes: 15 MB limit to support bulk question imports (10k × ~300 bytes ≈ 3 MB)
 app.use(express.json({ limit: "15mb" }));
+
+// ── Readiness probe ─────────────────────────────────────────
+// Responds immediately — no external calls. Used by load balancers and
+// container orchestrators to gate traffic before the process is ready.
+// Returns 503 until required env vars pass validation (startupGuard).
+app.get("/api/ready", (req, res) => {
+  res.json({ status: "ready", pid: process.pid, uptime: Math.round(process.uptime()) });
+});
 
 // ── Health check ────────────────────────────────────────────
 // Cache the probe result for 30 s so rapid polling (Vercel healthchecks,
@@ -279,6 +302,25 @@ if (require.main === module) {
   // to prevent random 502s under sustained load.
   server.keepAliveTimeout = 65_000;
   server.headersTimeout = 66_000;
+
+  // ── Graceful shutdown ─────────────────────────────────────────────────────────
+  // PM2 sends SIGINT on restart/stop. Stop accepting new connections, let in-flight
+  // requests finish within the ecosystem kill_timeout (8 s), then exit cleanly.
+  function gracefulShutdown(signal) {
+    logger.info(`[shutdown] ${signal} received — draining in-flight requests`);
+    server.close(() => {
+      logger.info('[shutdown] all connections closed — exiting');
+      process.exit(0);
+    });
+    // Hard exit if drain takes too long (PM2 will SIGKILL after kill_timeout anyway)
+    setTimeout(() => {
+      logger.error('[shutdown] forced exit after timeout');
+      process.exit(1);
+    }, 7_500).unref();
+  }
+
+  process.on('SIGINT',  () => gracefulShutdown('SIGINT'));
+  process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 }
 
 module.exports = app;

@@ -13,6 +13,11 @@ module.exports = {
       // without taking the entire API down.
       max_memory_restart: "500M",
 
+      // Graceful shutdown: give in-flight requests 8 s to drain before SIGKILL.
+      kill_timeout: 8000,
+      // Wait up to 10 s for the process to signal readiness before considering it failed.
+      listen_timeout: 10000,
+
       // Exponential back-off on crash: don't hammer the process manager.
       exp_backoff_restart_delay: 100,
 

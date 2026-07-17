@@ -101,6 +101,13 @@ router.get(
     try {
       const institution_id = req.user.institution_id;
 
+      const cacheKey = `analytics:admin:${institution_id || "sa"}`;
+      const cached = await redis.get(cacheKey);
+      if (cached) {
+        try { return res.json({ data: JSON.parse(cached) }); }
+        catch { /* corrupt — recompute */ }
+      }
+
       // 1. Fetch counts
       const [
         { count: totalStudents },
@@ -155,7 +162,7 @@ router.get(
         { data: institutionAssignments },
       ] = await Promise.all([
         testIds.length > 0
-          ? supabase.from("test_attempts").select("score, status").in("test_id", testIds).limit(5000)
+          ? supabase.from("test_attempts").select("score, status").in("test_id", testIds).limit(50000)
           : Promise.resolve({ data: [] }),
         instCourseIds.length > 0
           ? supabase.from("assignments").select("id").in("course_id", instCourseIds)
@@ -181,7 +188,7 @@ router.get(
           { data: subs },
           { count: pendingCount },
         ] = await Promise.all([
-          supabase.from("assignment_submissions").select("grade").in("assignment_id", assignmentIds).limit(5000),
+          supabase.from("assignment_submissions").select("grade").in("assignment_id", assignmentIds).limit(50000),
           supabase
             .from("assignment_submissions")
             .select("*", { count: "exact", head: true })
@@ -197,27 +204,27 @@ router.get(
           : 0;
       }
 
-      return res.json({
-        data: {
-          totalStudents: totalStudents || 0,
-          totalFaculty: totalFaculty || 0,
-          totalCourses: totalCourses || 0,
-          totalTests: totalTests || 0,
-          totalClasses: totalClasses || 0,
-          pendingGrading: pendingSubmissions || 0,
-          attendancePercent,
-          testStatistics: {
-            totalAttempts,
-            completedAttempts: submittedAttempts.length,
-            averageScore: avgTestScore,
-          },
-          assignmentStatistics: {
-            totalAssignments,
-            totalSubmissions,
-            averageGrade: avgAssignmentGrade,
-          }
+      const adminData = {
+        totalStudents: totalStudents || 0,
+        totalFaculty: totalFaculty || 0,
+        totalCourses: totalCourses || 0,
+        totalTests: totalTests || 0,
+        totalClasses: totalClasses || 0,
+        pendingGrading: pendingSubmissions || 0,
+        attendancePercent,
+        testStatistics: {
+          totalAttempts,
+          completedAttempts: submittedAttempts.length,
+          averageScore: avgTestScore,
         },
-      });
+        assignmentStatistics: {
+          totalAssignments,
+          totalSubmissions,
+          averageGrade: avgAssignmentGrade,
+        }
+      };
+      await redis.set(cacheKey, JSON.stringify(adminData), 60);
+      return res.json({ data: adminData });
     } catch (err) {
       return next(err);
     }

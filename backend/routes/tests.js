@@ -1,5 +1,6 @@
 const router = require("express").Router();
 const supabase = require("../lib/supabase");
+const redis    = require("../lib/redis");
 const authenticate = require("../middleware/auth");
 const { requireRole } = require("../middleware/roleGuard");
 
@@ -42,8 +43,13 @@ function normalizeCorrectAnswer(val, type) {
 }
 
 // GET /api/tests — list by institution + optional batch filter
+// Optional query params: ?limit=N&page=N (default: all up to 500 per page).
 router.get("/", authenticate, async (req, res, next) => {
   try {
+    const limit  = req.query.limit ? Math.min(500, Math.max(1, parseInt(req.query.limit, 10) || 500)) : 500;
+    const page   = req.query.page  ? Math.max(1, parseInt(req.query.page,  10) || 1) : 1;
+    const offset = (page - 1) * limit;
+
     let query = supabase.from("tests").select(`
       *,
       profiles:created_by ( name ),
@@ -64,9 +70,12 @@ router.get("/", authenticate, async (req, res, next) => {
       query = query.eq("status", "published");
     }
 
-    const { data, error } = await query.order("created_at", { ascending: false });
+    const { data, error } = await query
+      .order("created_at", { ascending: false })
+      .range(offset, offset + limit - 1);
+
     if (error) return res.status(400).json({ error: error.message });
-    return res.json({ data });
+    return res.json({ data, meta: { page, limit } });
   } catch (err) {
     return next(err);
   }
@@ -198,13 +207,13 @@ router.get(
       const { data: test, error: testError } = await testQuery.single();
       if (testError || !test) return res.status(404).json({ error: "Test not found" });
 
-      // Best-effort institution name
-      let institutionName = null;
-      try {
-        const { data: inst } = await supabase
-          .from("institutions").select("name").eq("id", test.institution_id).maybeSingle();
-        institutionName = inst?.name ?? null;
-      } catch (_) {}
+      // Cache check — after ownership verified. Saves 3-4 DB round-trips on every admin refresh.
+      const cacheKey = `analytics:test:summary:${testId}`;
+      const cached = await redis.get(cacheKey);
+      if (cached) {
+        try { return res.json({ data: JSON.parse(cached) }); }
+        catch { /* corrupt — recompute */ }
+      }
 
       const questions = (test.test_questions || []).sort(
         (a, b) => (a.order_index ?? 0) - (b.order_index ?? 0)
@@ -212,29 +221,31 @@ router.get(
       const totalQuestions = questions.length;
       const maxScore = questions.reduce((s, q) => s + (q.marks || 1), 0);
 
-      // All attempts + profiles (lightweight — no answers)
-      const { data: allAttempts } = await supabase
-        .from("test_attempts")
-        .select(
-          "id, status, score, started_at, submitted_at, auto_submitted, last_answered_at," +
-          " profiles:student_id ( id, name, email, roll_number )"
-        )
-        .eq("test_id", testId);
+      // Institution name, all attempts, and batch enrollment count are independent — fetch in parallel.
+      const [
+        { data: instRow },
+        { data: allAttempts },
+        { count: totalEnrolled },
+      ] = await Promise.all([
+        supabase.from("institutions").select("name").eq("id", test.institution_id).maybeSingle().catch(() => ({ data: null })),
+        supabase
+          .from("test_attempts")
+          .select(
+            "id, status, score, started_at, submitted_at, auto_submitted, last_answered_at," +
+            " profiles:student_id ( id, name, email, roll_number )"
+          )
+          .eq("test_id", testId)
+          .limit(10000),
+        test.batch_id
+          ? supabase.from("batch_students").select("*", { count: "exact", head: true }).eq("batch_id", test.batch_id)
+          : Promise.resolve({ count: null }),
+      ]);
 
+      const institutionName = instRow?.name ?? null;
       const attempts = allAttempts || [];
       const submitted = attempts.filter(a => a.status === "submitted");
       const inProgress = attempts.filter(a => a.status === "in_progress");
       const submittedIds = submitted.map(a => a.id);
-
-      // Batch enrollment count
-      let totalEnrolled = null;
-      if (test.batch_id) {
-        const { count } = await supabase
-          .from("batch_students")
-          .select("*", { count: "exact", head: true })
-          .eq("batch_id", test.batch_id);
-        totalEnrolled = count ?? null;
-      }
 
       // Question-level answer stats (one query)
       const qStats = {}; // { [question_id]: { total, correct, wrong } }
@@ -242,7 +253,8 @@ router.get(
         const { data: allAnswers } = await supabase
           .from("test_answers")
           .select("attempt_id, question_id, is_correct, answer")
-          .in("attempt_id", submittedIds);
+          .in("attempt_id", submittedIds)
+          .limit(200000);
 
         for (const ans of allAnswers || []) {
           if (!qStats[ans.question_id]) qStats[ans.question_id] = { total: 0, correct: 0, wrong: 0 };
@@ -311,30 +323,30 @@ router.get(
         },
       }));
 
-      return res.json({
-        data: {
-          test: {
-            id: test.id, title: test.title, type: test.type,
-            duration_mins: test.duration_mins, batch_id: test.batch_id,
-            batch: test.batches || null, institution_name: institutionName,
-          },
-          summary: {
-            total_enrolled: totalEnrolled,
-            total_attempted: attempts.length,
-            submitted: subAug.length,
-            in_progress: inProgress.length,
-            not_started: totalEnrolled != null ? Math.max(0, totalEnrolled - attempts.length) : null,
-            auto_submitted: autoSubmittedCount,
-            avg_score: avgScore, avg_pct: avgPct,
-            high_score: highScore, low_score: lowScore,
-            pass_count: passCount, fail_count: failCount,
-            pass_rate: passRate, fail_rate: 100 - passRate,
-            avg_time_secs: avgTimeSecs, fastest, slowest, suspicious,
-          },
-          questions: enrichedQuestions,
-          max_score: maxScore, total_questions: totalQuestions,
+      const responseData = {
+        test: {
+          id: test.id, title: test.title, type: test.type,
+          duration_mins: test.duration_mins, batch_id: test.batch_id,
+          batch: test.batches || null, institution_name: institutionName,
         },
-      });
+        summary: {
+          total_enrolled: totalEnrolled ?? null,
+          total_attempted: attempts.length,
+          submitted: subAug.length,
+          in_progress: inProgress.length,
+          not_started: totalEnrolled != null ? Math.max(0, totalEnrolled - attempts.length) : null,
+          auto_submitted: autoSubmittedCount,
+          avg_score: avgScore, avg_pct: avgPct,
+          high_score: highScore, low_score: lowScore,
+          pass_count: passCount, fail_count: failCount,
+          pass_rate: passRate, fail_rate: 100 - passRate,
+          avg_time_secs: avgTimeSecs, fastest, slowest, suspicious,
+        },
+        questions: enrichedQuestions,
+        max_score: maxScore, total_questions: totalQuestions,
+      };
+      await redis.set(cacheKey, JSON.stringify(responseData), 30);
+      return res.json({ data: responseData });
     } catch (err) {
       return next(err);
     }
@@ -468,6 +480,16 @@ router.get(
 // GET /api/tests/:id — test with questions
 router.get("/:id", authenticate, async (req, res, next) => {
   try {
+    // Hot path during exam window: all students load the same question paper.
+    // Serve from cache to avoid hammering the DB with 1500 identical reads.
+    if (req.user.role === "student") {
+      const hit = await redis.get(`test:paper:${req.params.id}`);
+      if (hit) {
+        try { return res.json({ data: JSON.parse(hit) }); }
+        catch { /* corrupt entry — fall through to DB */ }
+      }
+    }
+
     let query = supabase
       .from("tests")
       .select("*, test_questions(*)")
@@ -492,12 +514,10 @@ router.get("/:id", authenticate, async (req, res, next) => {
           ...question,
           options: normalizeOptions(question.options),
         }));
-      return res.json({
-        data: {
-          ...data,
-          test_questions: sanitizedQuestions,
-        },
-      });
+      const sanitizedData = { ...data, test_questions: sanitizedQuestions };
+      // Cache published papers for 2 min — questions are effectively locked during active exams.
+      await redis.set(`test:paper:${req.params.id}`, JSON.stringify(sanitizedData), 120);
+      return res.json({ data: sanitizedData });
     }
 
     const normalizedQuestions = (data.test_questions || [])
@@ -707,6 +727,9 @@ router.post(
         });
       } catch (_) {}
 
+      // Invalidate cached student paper — questions just changed
+      redis.del(`test:paper:${req.params.id}`).catch(() => {});
+
       return res.status(201).json({
         data: { inserted: insertedIds.length, skipped: errors.length, errors },
       });
@@ -825,6 +848,8 @@ router.put(
         }
       }
 
+      // Invalidate cached student paper — test metadata or status changed
+      redis.del(`test:paper:${req.params.id}`).catch(() => {});
       return res.json({ data });
     } catch (err) {
       return next(err);
@@ -885,6 +910,8 @@ router.put(
         console.error("[tests] notification error:", notifErr.message);
       }
 
+      // Invalidate cached paper — test is now published (or status toggled)
+      redis.del(`test:paper:${req.params.id}`).catch(() => {});
       return res.json({ data });
     } catch (err) {
       return next(err);

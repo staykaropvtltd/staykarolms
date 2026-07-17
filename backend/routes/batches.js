@@ -121,21 +121,23 @@ router.post("/:id/courses", authenticate, requireRole("admin", "super-admin"), a
   if (!course_id) return res.status(400).json({ error: "course_id is required" });
 
   try {
-    // 1. Create batch_courses link (upsert so duplicate is safe)
-    const { data: bc, error: bcErr } = await supabase
-      .from("batch_courses")
-      .upsert({ batch_id: req.params.id, course_id }, { onConflict: "batch_id,course_id", ignoreDuplicates: true })
-      .select()
-      .single();
+    // 1+2. Create batch_courses link and fetch current batch students concurrently.
+    const [
+      { data: bc, error: bcErr },
+      { data: batchStudents, error: bsErr },
+    ] = await Promise.all([
+      supabase
+        .from("batch_courses")
+        .upsert({ batch_id: req.params.id, course_id }, { onConflict: "batch_id,course_id", ignoreDuplicates: true })
+        .select()
+        .single(),
+      supabase
+        .from("batch_students")
+        .select("student_id")
+        .eq("batch_id", req.params.id),
+    ]);
 
     if (bcErr) return res.status(400).json({ error: bcErr.message });
-
-    // 2. Fetch all students currently in this batch
-    const { data: batchStudents, error: bsErr } = await supabase
-      .from("batch_students")
-      .select("student_id")
-      .eq("batch_id", req.params.id);
-
     if (bsErr) return res.status(400).json({ error: bsErr.message });
 
     // 3. Bulk-enroll all batch students into the course (ignore duplicates)
@@ -249,17 +251,21 @@ router.post("/:id/students/bulk", authenticate, requireRole("admin", "super-admi
 
     const inserts = profiles.map(p => ({ batch_id: req.params.id, student_id: p.id }));
 
-    const { error: insertError } = await supabase
-      .from("batch_students")
-      .upsert(inserts, { onConflict: "batch_id,student_id", ignoreDuplicates: true });
+    // Add students to batch and fetch batch's allocated courses concurrently.
+    const [
+      { error: insertError },
+      { data: batchCourses },
+    ] = await Promise.all([
+      supabase
+        .from("batch_students")
+        .upsert(inserts, { onConflict: "batch_id,student_id", ignoreDuplicates: true }),
+      supabase
+        .from("batch_courses")
+        .select("course_id")
+        .eq("batch_id", req.params.id),
+    ]);
 
     if (insertError) return res.status(400).json({ error: insertError.message });
-
-    // Auto-enroll all added students in batch's allocated courses
-    const { data: batchCourses } = await supabase
-      .from("batch_courses")
-      .select("course_id")
-      .eq("batch_id", req.params.id);
 
     if (batchCourses && batchCourses.length > 0) {
       const enrollments = profiles.flatMap(p =>

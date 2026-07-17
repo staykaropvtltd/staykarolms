@@ -43,7 +43,6 @@ async function fetchMergedEvents(req, from, to) {
   }
   if (from) eventsQuery = eventsQuery.gte("scheduled_at", from);
   if (to) eventsQuery = eventsQuery.lte("scheduled_at", to);
-  const { data: calendarEvents } = await eventsQuery;
 
   // 2. Fetch Live Classes
   let classesQuery = supabase.from("live_classes").select("*, courses:course_id(title)");
@@ -64,7 +63,6 @@ async function fetchMergedEvents(req, from, to) {
   }
   if (from) classesQuery = classesQuery.gte("scheduled_at", from);
   if (to) classesQuery = classesQuery.lte("scheduled_at", to);
-  const { data: liveClasses } = await classesQuery;
 
   // 3. Fetch Tests
   let testsQuery = supabase.from("tests").select("*, batches:batch_id(courses:course_id(title))");
@@ -87,7 +85,6 @@ async function fetchMergedEvents(req, from, to) {
   }
   if (from) testsQuery = testsQuery.gte("scheduled_at", from);
   if (to) testsQuery = testsQuery.lte("scheduled_at", to);
-  const { data: tests } = await testsQuery;
 
   // 4. Fetch Assignments
   let assignmentsQuery = supabase.from("assignments").select("*, courses:course_id(title, institution_id)");
@@ -108,7 +105,13 @@ async function fetchMergedEvents(req, from, to) {
   }
   if (from) assignmentsQuery = assignmentsQuery.gte("due_date", from);
   if (to) assignmentsQuery = assignmentsQuery.lte("due_date", to);
-  const { data: assignments } = await assignmentsQuery;
+  // Fire all 4 event queries in parallel — they are fully independent of each other.
+  const [
+    { data: calendarEvents },
+    { data: liveClasses },
+    { data: tests },
+    { data: assignments },
+  ] = await Promise.all([eventsQuery, classesQuery, testsQuery, assignmentsQuery]);
 
   // Format all events consistently
   const formattedCalendar = (calendarEvents || []).map((e) => ({

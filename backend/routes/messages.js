@@ -1,5 +1,6 @@
 const router = require("express").Router();
 const supabase = require("../lib/supabase");
+const redis    = require("../lib/redis");
 const authenticate = require("../middleware/auth");
 
 // GET /api/messages — get all conversation threads for current user
@@ -67,6 +68,10 @@ router.get("/", authenticate, async (req, res, next) => {
 // GET /api/messages/unread/count — must be before /:userId to avoid Express shadowing
 router.get("/unread/count", authenticate, async (req, res, next) => {
   try {
+    const cacheKey = `msg:unread:${req.user.id}`;
+    const hit = await redis.get(cacheKey);
+    if (hit !== null) return res.json({ data: { count: parseInt(hit, 10) } });
+
     const { count, error } = await supabase
       .from("messages")
       .select("*", { count: "exact", head: true })
@@ -74,6 +79,7 @@ router.get("/unread/count", authenticate, async (req, res, next) => {
       .eq("read", false);
 
     if (error) return res.status(400).json({ error: error.message });
+    await redis.set(cacheKey, String(count || 0), 10);
     return res.json({ data: { count: count || 0 } });
   } catch (err) {
     return next(err);
@@ -96,13 +102,14 @@ router.get("/:userId", authenticate, async (req, res, next) => {
 
     if (error) return res.status(400).json({ error: error.message });
 
-    // Mark unread messages as read
+    // Mark unread messages as read and invalidate the cached unread count
     await supabase
       .from("messages")
       .update({ read: true })
       .eq("sender_id", otherId)
       .eq("receiver_id", myId)
       .eq("read", false);
+    redis.del(`msg:unread:${myId}`).catch(() => {});
 
     return res.json({
       data: (data || []).map((msg) => ({
@@ -164,6 +171,9 @@ router.post("/", authenticate, async (req, res, next) => {
     } catch (nErr) {
       console.error("[messages] notification error:", nErr.message);
     }
+
+    // Invalidate receiver's cached unread count
+    redis.del(`msg:unread:${receiver_id}`).catch(() => {});
 
     return res.status(201).json({ data: { ...data, isMe: true } });
   } catch (err) {

@@ -432,18 +432,12 @@ router.get("/active", authenticate, async (req, res, next) => {
 
     // If student, filter by their enrolled batches/courses
     if (req.user.role === "student") {
-      // Get student's batches
-      const { data: batchData } = await supabase
-        .from("batch_students")
-        .select("batch_id")
-        .eq("student_id", req.user.id);
+      // Fetch student's batches and courses concurrently
+      const [{ data: batchData }, { data: courseData }] = await Promise.all([
+        supabase.from("batch_students").select("batch_id").eq("student_id", req.user.id),
+        supabase.from("enrollments").select("course_id").eq("student_id", req.user.id),
+      ]);
       const batchIds = batchData ? batchData.map(b => b.batch_id) : [];
-
-      // Get student's courses
-      const { data: courseData } = await supabase
-        .from("enrollments")
-        .select("course_id")
-        .eq("student_id", req.user.id);
       const courseIds = courseData ? courseData.map(c => c.course_id) : [];
 
       // Create an OR filter for batch_id OR course_id OR general classes

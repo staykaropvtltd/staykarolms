@@ -1,5 +1,5 @@
 // performance/scenarios/exam-capacity.js
-// Focused capacity test: 300 → 400 → 500 → 600 → 750 → 1000 concurrent exam students.
+// Focused capacity test: 300 → 400 → 500 → 600 → 750 → 1000 → 1200 → 1500 concurrent exam students.
 //
 // Targets (ALL must hold at every stage for that stage to pass):
 //   - http_req_failed  < 1%   (zero lost answers / submissions tolerated)
@@ -59,6 +59,14 @@ export const options = {
     // Stage 6: 1000 VUs
     { duration: '30s', target: 1000 },
     { duration: '2m',  target: 1000 },
+
+    // Stage 7: 1200 VUs (20% above 1000 — first stretch target)
+    { duration: '30s', target: 1200 },
+    { duration: '2m',  target: 1200 },
+
+    // Stage 8: 1500 VUs (production 6PM–10PM peak target)
+    { duration: '30s', target: 1500 },
+    { duration: '3m',  target: 1500 },
 
     // Cool-down
     { duration: '1m',  target: 0 },
@@ -221,7 +229,7 @@ export function handleSummary(data) {
 </head>
 <body>
 <h1>StayKaro LMS — Exam Capacity Test</h1>
-<h2>300 → 400 → 500 → 600 → 750 → 1000 VUs &nbsp;·&nbsp; ${ts}</h2>
+<h2>300 → 400 → 500 → 600 → 750 → 1000 → 1200 → 1500 VUs &nbsp;·&nbsp; ${ts}</h2>
 
 <div class="grid">
   <div class="card">

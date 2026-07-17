@@ -75,7 +75,22 @@ router.post("/start", authenticate, requireRole("student"), async (req, res, nex
       .select()
       .single();
 
-    if (error) return res.status(400).json({ error: error.message });
+    if (error) {
+      // Race condition: two concurrent /start calls both passed the "existing" check.
+      // Unique constraint fires on the second insert — fetch and return the winner's attempt.
+      if (error.code === "23505") {
+        const { data: race } = await supabase
+          .from("test_attempts")
+          .select("id, status")
+          .eq("test_id", test_id)
+          .eq("student_id", req.user.id)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (race) return res.json({ data: race });
+      }
+      return res.status(400).json({ error: error.message });
+    }
     return res.status(201).json({ data });
   } catch (err) {
     return next(err);
@@ -260,6 +275,8 @@ router.post("/:id/submit", authenticate, requireRole("student"), async (req, res
     const answeredCount = gradedRows.filter(r => r.answer !== null && r.answer !== undefined && r.answer !== "").length;
     const wrongCount    = answeredCount - correctCount;
 
+    // CAS update: only succeeds when status is still "in_progress".
+    // If two submit requests race, exactly one will match this WHERE clause.
     const { data, error } = await supabase
       .from("test_attempts")
       .update({
@@ -272,10 +289,18 @@ router.post("/:id/submit", authenticate, requireRole("student"), async (req, res
         answered_count: answeredCount,
       })
       .eq("id", attemptId)
+      .eq("status", "in_progress")
       .select()
       .single();
 
-    if (error) return res.status(400).json({ error: error.message });
+    if (error) {
+      // PGRST116 = 0 rows — attempt was already submitted by a concurrent request
+      if (error.code === "PGRST116" || !data) {
+        return res.status(400).json({ error: "Attempt already submitted" });
+      }
+      return res.status(400).json({ error: error.message });
+    }
+    if (!data) return res.status(400).json({ error: "Attempt already submitted" });
     return res.json({ data: { ...data, score: totalScore } });
   } catch (err) {
     return next(err);

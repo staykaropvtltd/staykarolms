@@ -81,6 +81,20 @@ router.post(
         return res.status(400).json({ error: "user_id or user_ids is required" });
       }
 
+      // Tenant isolation: non-super-admins can only notify users in their own institution
+      if (req.user.role !== "super-admin") {
+        const { data: validProfiles } = await supabase
+          .from("profiles")
+          .select("id")
+          .in("id", recipients)
+          .eq("institution_id", req.user.institution_id);
+        const validIds = new Set((validProfiles || []).map((p) => p.id));
+        const outsiders = recipients.filter((id) => !validIds.has(id));
+        if (outsiders.length > 0) {
+          return res.status(403).json({ error: "One or more recipients are not in your institution" });
+        }
+      }
+
       const rows = recipients.map((uid) => ({
         user_id: uid,
         title,

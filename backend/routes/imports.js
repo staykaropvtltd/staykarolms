@@ -28,6 +28,16 @@ const upload = multer({
 
 // ── Helpers ─────────────────────────────────────────────────────────────────────
 
+const JOB_STORE_MAX = 200; // cap in-memory fallback — evict oldest on overflow
+
+function jobStoreSet(key, value) {
+  if (!jobStore.has(key) && jobStore.size >= JOB_STORE_MAX) {
+    // Map preserves insertion order; delete the oldest entry
+    jobStore.delete(jobStore.keys().next().value);
+  }
+  jobStore.set(key, value);
+}
+
 async function saveJob(job) {
   try {
     const { error } = await supabase.from("import_jobs").insert([{
@@ -47,15 +57,15 @@ async function saveJob(job) {
     }]);
     if (error) {
       // Table may not exist yet — store in-memory only
-      jobStore.set(job.id, job);
+      jobStoreSet(job.id, job);
     }
   } catch {
-    jobStore.set(job.id, job);
+    jobStoreSet(job.id, job);
   }
 }
 
 async function updateJob(jobId, patch) {
-  jobStore.set(jobId, { ...(jobStore.get(jobId) || {}), ...patch });
+  jobStoreSet(jobId, { ...(jobStore.get(jobId) || {}), ...patch });
   try {
     await supabase.from("import_jobs").update(patch).eq("id", jobId);
   } catch { /* ignore */ }

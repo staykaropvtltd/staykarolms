@@ -37,6 +37,7 @@ router.post(
           student_id,
           course_id,
           verification_code: code,
+          ...(file_url ? { file_url } : {}),
         })
         .select()
         .single();
@@ -45,17 +46,18 @@ router.post(
 
       const host = req.get("host");
       const protocol = req.protocol;
-      const downloadUrl = `${protocol}://${host}/api/certificates/${cert.id}/download`;
+      const downloadUrl = file_url || `${protocol}://${host}/api/certificates/${cert.id}/download`;
 
-      const { data, error } = await supabase
-        .from("certificates")
-        .update({ file_url: file_url || downloadUrl })
-        .eq("id", cert.id)
-        .select()
-        .single();
+      // Persist the computed download URL asynchronously — avoids a blocking round-trip.
+      if (!file_url) {
+        supabase
+          .from("certificates")
+          .update({ file_url: downloadUrl })
+          .eq("id", cert.id)
+          .catch(err => console.error("[certificates] async file_url update failed:", err.message));
+      }
 
-      if (error) return res.status(400).json({ error: error.message });
-      return res.status(201).json({ data });
+      return res.status(201).json({ data: { ...cert, file_url: downloadUrl } });
     } catch (err) {
       return next(err);
     }

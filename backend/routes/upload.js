@@ -10,7 +10,13 @@ router.get("/retrieve", authenticate, async (req, res, next) => {
     return res.status(400).json({ error: "path is required" });
   }
 
-  const bucketName = bucket || "uploads";
+  // Reject path traversal attempts and absolute paths
+  if (/\.\.|\0|^\//.test(path) || path.includes("://")) {
+    return res.status(400).json({ error: "Invalid file path" });
+  }
+
+  // Only allow explicitly whitelisted buckets — never trust client-supplied bucket
+  const bucketName = ALLOWED_BUCKETS.includes(bucket) ? bucket : "uploads";
 
   try {
     // Generate a signed URL valid for 2 hours (7200 seconds)

@@ -232,6 +232,19 @@ router.put(
     if (!status) return res.status(400).json({ error: "status is required" });
 
     try {
+      // Tenant isolation: admins can only update tickets from their own institution
+      if (req.user.role === "admin") {
+        const { data: ticket, error: ticketErr } = await supabase
+          .from("support_tickets")
+          .select("institution_id")
+          .eq("id", req.params.id)
+          .single();
+        if (ticketErr || !ticket) return res.status(404).json({ error: "Ticket not found" });
+        if (ticket.institution_id !== req.user.institution_id) {
+          return res.status(403).json({ error: "Forbidden" });
+        }
+      }
+
       const { data, error } = await supabase
         .from("support_tickets")
         .update({ status, updated_at: new Date().toISOString() })

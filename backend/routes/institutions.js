@@ -32,6 +32,11 @@ router.get("/", authenticate, async (req, res, next) => {
 
 // GET /api/institutions/:id — single institution with counts
 router.get("/:id", authenticate, requireRole("super-admin", "admin"), async (req, res, next) => {
+  // Admins can only access their own institution record
+  if (req.user.role === "admin" && req.params.id !== req.user.institution_id) {
+    return res.status(403).json({ error: "Forbidden" });
+  }
+
   try {
     const { data, error } = await supabase
       .from("institutions")
