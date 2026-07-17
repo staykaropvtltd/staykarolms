@@ -5,11 +5,12 @@ import { motion, AnimatePresence } from "motion/react";
 import {
   Plus, Search, ClipboardList, Clock, Calendar, CheckCircle2,
   ChevronRight, ChevronLeft, GripVertical, Trash2, Edit2, Play,
-  Users, Loader2, Upload, X, Award, User,
+  Users, Loader2, Upload, X, Award, User, Archive, RotateCcw, AlertTriangle,
 } from "lucide-react";
 import {
   getTests, createTest, addTestQuestion, publishTest,
-  updateTest, deleteTest, getTestAttempts, getBatches,
+  updateTest, archiveTest, restoreTest, forceDeleteTest,
+  getTestAttempts, getBatches,
   getTest, updateTestQuestion, deleteTestQuestion, getAttemptResult,
 } from "@/shared/lib/api";
 import { toast } from "sonner";
@@ -758,27 +759,102 @@ function TestResultsModal({ test, onClose }: { test: any; onClose: () => void })
   );
 }
 
+// ── Force-delete confirmation modal ──────────────────────────────────────────
+
+function ForceDeleteModal({
+  test, onClose, onDeleted,
+}: { test: any; onClose: () => void; onDeleted: () => void }) {
+  const [typed, setTyped]   = useState("");
+  const [busy,  setBusy]    = useState(false);
+  const confirmed = typed === test.title;
+
+  const handleForceDelete = async () => {
+    if (!confirmed) return;
+    setBusy(true);
+    const { data, error } = await forceDeleteTest(test.id);
+    setBusy(false);
+    if (error) { toast.error(error); return; }
+    toast.success(`"${test.title}" permanently deleted (${(data as any)?.attempts_deleted ?? 0} attempts removed)`);
+    onDeleted();
+    onClose();
+  };
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+      <div className="bg-card border border-red-500/30 rounded-2xl w-full max-w-md shadow-2xl p-6 space-y-5">
+        <div className="flex items-start gap-3">
+          <div className="w-10 h-10 rounded-full bg-red-500/10 flex items-center justify-center shrink-0">
+            <AlertTriangle className="w-5 h-5 text-red-500" />
+          </div>
+          <div>
+            <h3 className="text-base font-bold text-foreground">Permanently Delete Test</h3>
+            <p className="text-sm text-muted-foreground mt-1">
+              This will delete <strong>all attempts, scores, and analytics</strong> for this test. This action is irreversible.
+            </p>
+          </div>
+        </div>
+
+        <div className="rounded-lg bg-red-500/5 border border-red-500/20 px-4 py-3 text-sm">
+          <p className="font-semibold text-foreground truncate">{test.title}</p>
+          {(test.test_questions?.[0]?.count ?? 0) > 0 && (
+            <p className="text-muted-foreground text-xs mt-0.5">{test.test_questions[0].count} questions</p>
+          )}
+        </div>
+
+        <div className="space-y-1.5">
+          <label className="text-xs font-medium text-muted-foreground">
+            Type the test title to confirm:
+          </label>
+          <input
+            value={typed}
+            onChange={e => setTyped(e.target.value)}
+            placeholder={test.title}
+            className="w-full px-3 py-2 text-sm rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-red-500/20"
+          />
+        </div>
+
+        <div className="flex gap-2">
+          <button
+            onClick={handleForceDelete}
+            disabled={!confirmed || busy}
+            className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-red-500 text-white text-sm font-bold rounded-xl hover:bg-red-600 disabled:opacity-40 transition-colors"
+          >
+            {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+            Delete Permanently
+          </button>
+          <button onClick={onClose} className="px-4 py-2.5 border border-border rounded-xl text-sm font-semibold hover:bg-muted transition-colors">
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── All Tests Tab ─────────────────────────────────────────────────────────────
 
 function AllTestsTab() {
-  const [filterType, setFilterType] = useState("all");
-  const [tests, setTests] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState("");
-  const [editingTest, setEditingTest] = useState<any | null>(null);
-  const [resultsTest, setResultsTest] = useState<any | null>(null);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [filterType,    setFilterType]    = useState("all");
+  const [showArchived,  setShowArchived]  = useState(false);
+  const [tests,         setTests]         = useState<any[]>([]);
+  const [loading,       setLoading]       = useState(true);
+  const [search,        setSearch]        = useState("");
+  const [editingTest,   setEditingTest]   = useState<any | null>(null);
+  const [resultsTest,   setResultsTest]   = useState<any | null>(null);
+  const [busyId,        setBusyId]        = useState<string | null>(null);
+  const [forceTarget,   setForceTarget]   = useState<any | null>(null);
 
   const fetchTests = async () => {
     setLoading(true);
     const params: Record<string, string> = {};
     if (filterType !== "all") params.type = filterType;
+    if (showArchived)         params.archived = "true";
     const { data } = await getTests(Object.keys(params).length ? params : undefined);
     setTests(data || []);
     setLoading(false);
   };
 
-  useEffect(() => { fetchTests(); }, [filterType]);
+  useEffect(() => { fetchTests(); }, [filterType, showArchived]);
 
   const handlePublish = async (testId: string) => {
     const { error } = await publishTest(testId);
@@ -787,13 +863,22 @@ function AllTestsTab() {
     fetchTests();
   };
 
-  const handleDelete = async (testId: string, title: string) => {
-    if (!window.confirm(`Delete "${title}"? This cannot be undone.`)) return;
-    setDeletingId(testId);
-    const { error } = await deleteTest(testId);
-    setDeletingId(null);
+  const handleArchive = async (testId: string, title: string) => {
+    if (!window.confirm(`Archive "${title}"?\n\nThe test will be hidden from students. All attempts and scores are preserved. You can restore it later.`)) return;
+    setBusyId(testId);
+    const { error } = await archiveTest(testId);
+    setBusyId(null);
     if (error) { toast.error(error); return; }
-    toast.success("Test deleted");
+    toast.success(`"${title}" archived`);
+    fetchTests();
+  };
+
+  const handleRestore = async (testId: string, title: string) => {
+    setBusyId(testId);
+    const { error } = await restoreTest(testId);
+    setBusyId(null);
+    if (error) { toast.error(error); return; }
+    toast.success(`"${title}" restored`);
     fetchTests();
   };
 
@@ -804,21 +889,22 @@ function AllTestsTab() {
   return (
     <>
       {editingTest && (
-        <EditTestModal
-          test={editingTest}
-          onClose={() => setEditingTest(null)}
-          onSaved={fetchTests}
-        />
+        <EditTestModal test={editingTest} onClose={() => setEditingTest(null)} onSaved={fetchTests} />
       )}
       {resultsTest && (
-        <TestAnalyticsModal
-          test={resultsTest}
-          onClose={() => setResultsTest(null)}
+        <TestAnalyticsModal test={resultsTest} onClose={() => setResultsTest(null)} />
+      )}
+      {forceTarget && (
+        <ForceDeleteModal
+          test={forceTarget}
+          onClose={() => setForceTarget(null)}
+          onDeleted={fetchTests}
         />
       )}
 
-      <div className="space-y-6">
-        <div className="flex flex-col sm:flex-row gap-4">
+      <div className="space-y-5">
+        {/* Toolbar */}
+        <div className="flex flex-col sm:flex-row gap-3">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
             <input
@@ -839,7 +925,27 @@ function AllTestsTab() {
             <option value="aptitude">Aptitude</option>
             <option value="mock">Mock</option>
           </select>
+          {/* Archive toggle */}
+          <button
+            onClick={() => { setShowArchived(!showArchived); setSearch(""); }}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl border text-sm font-semibold transition-colors ${
+              showArchived
+                ? "bg-amber-500/10 border-amber-500/30 text-amber-600 dark:text-amber-400"
+                : "bg-card border-border text-muted-foreground hover:bg-muted"
+            }`}
+          >
+            <Archive className="w-4 h-4" />
+            {showArchived ? "Archived Tests" : "Show Archived"}
+          </button>
         </div>
+
+        {/* Archived notice banner */}
+        {showArchived && (
+          <div className="flex items-center gap-2 px-4 py-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-sm text-amber-700 dark:text-amber-400">
+            <Archive className="w-4 h-4 shrink-0" />
+            <span>These tests are hidden from students. Restore to make them visible again, or use Force Delete to permanently remove all data.</span>
+          </div>
+        )}
 
         {loading ? (
           <div className="flex items-center justify-center py-20 bg-card border rounded-2xl">
@@ -849,8 +955,10 @@ function AllTestsTab() {
         ) : filtered.length === 0 ? (
           <div className="py-20 text-center text-muted-foreground bg-card border rounded-2xl">
             <ClipboardList className="w-10 h-10 mx-auto mb-2 opacity-30" />
-            <p className="font-medium">No tests found.</p>
-            <p className="text-sm mt-1">Create one to get started.</p>
+            <p className="font-medium">{showArchived ? "No archived tests." : "No tests found."}</p>
+            <p className="text-sm mt-1">
+              {showArchived ? "Archive a test to see it here." : "Create one to get started."}
+            </p>
           </div>
         ) : (
           <div className="bg-card border rounded-2xl overflow-hidden shadow-sm">
@@ -869,12 +977,20 @@ function AllTestsTab() {
                 </thead>
                 <tbody className="divide-y">
                   {filtered.map((test: any) => (
-                    <tr key={test.id} className="hover:bg-muted/30 transition-colors">
+                    <tr key={test.id} className={`hover:bg-muted/30 transition-colors ${showArchived ? "opacity-75" : ""}`}>
                       <td className="px-6 py-4 font-semibold text-foreground max-w-xs">
-                        <p className="truncate">{test.title}</p>
+                        <div className="flex items-center gap-2">
+                          {showArchived && <Archive className="w-3.5 h-3.5 text-amber-500 shrink-0" />}
+                          <p className="truncate">{test.title}</p>
+                        </div>
                         {test.duration_mins && (
-                          <p className="text-xs text-muted-foreground font-normal flex items-center gap-1 mt-0.5">
+                          <p className="text-xs text-muted-foreground font-normal flex items-center gap-1 mt-0.5 ml-0">
                             <Clock className="w-3 h-3" /> {test.duration_mins} min
+                            {showArchived && test.archived_at && (
+                              <span className="ml-2 text-amber-600 dark:text-amber-400">
+                                · Archived {new Date(test.archived_at).toLocaleDateString()}
+                              </span>
+                            )}
                           </p>
                         )}
                       </td>
@@ -913,35 +1029,65 @@ function AllTestsTab() {
                       </td>
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-1">
-                          <button
-                            onClick={() => setEditingTest(test)}
-                            title="Edit test"
-                            className="p-1.5 hover:bg-primary/10 hover:text-primary rounded-lg text-muted-foreground transition-colors">
-                            <Edit2 className="w-4 h-4" />
-                          </button>
-                          <button
-                            onClick={() => setResultsTest(test)}
-                            title="View results"
-                            className="p-1.5 hover:bg-blue-500/10 hover:text-blue-600 rounded-lg text-muted-foreground transition-colors">
-                            <Users className="w-4 h-4" />
-                          </button>
-                          {test.status === "draft" && (
-                            <button
-                              onClick={() => handlePublish(test.id)}
-                              title="Publish test"
-                              className="p-1.5 hover:bg-green-500/10 hover:text-green-600 rounded-lg text-muted-foreground transition-colors">
-                              <Play className="w-4 h-4" />
-                            </button>
+                          {!showArchived ? (
+                            // ── Active test actions ──
+                            <>
+                              <button
+                                onClick={() => setEditingTest(test)}
+                                title="Edit test"
+                                className="p-1.5 hover:bg-primary/10 hover:text-primary rounded-lg text-muted-foreground transition-colors">
+                                <Edit2 className="w-4 h-4" />
+                              </button>
+                              <button
+                                onClick={() => setResultsTest(test)}
+                                title="View analytics"
+                                className="p-1.5 hover:bg-blue-500/10 hover:text-blue-600 rounded-lg text-muted-foreground transition-colors">
+                                <Users className="w-4 h-4" />
+                              </button>
+                              {test.status === "draft" && (
+                                <button
+                                  onClick={() => handlePublish(test.id)}
+                                  title="Publish test"
+                                  className="p-1.5 hover:bg-green-500/10 hover:text-green-600 rounded-lg text-muted-foreground transition-colors">
+                                  <Play className="w-4 h-4" />
+                                </button>
+                              )}
+                              <button
+                                onClick={() => handleArchive(test.id, test.title)}
+                                disabled={busyId === test.id}
+                                title="Archive test"
+                                className="p-1.5 hover:bg-amber-500/10 hover:text-amber-600 rounded-lg text-muted-foreground transition-colors disabled:opacity-40">
+                                {busyId === test.id
+                                  ? <Loader2 className="w-4 h-4 animate-spin" />
+                                  : <Archive className="w-4 h-4" />}
+                              </button>
+                            </>
+                          ) : (
+                            // ── Archived test actions ──
+                            <>
+                              <button
+                                onClick={() => setResultsTest(test)}
+                                title="View analytics"
+                                className="p-1.5 hover:bg-blue-500/10 hover:text-blue-600 rounded-lg text-muted-foreground transition-colors">
+                                <Users className="w-4 h-4" />
+                              </button>
+                              <button
+                                onClick={() => handleRestore(test.id, test.title)}
+                                disabled={busyId === test.id}
+                                title="Restore test"
+                                className="p-1.5 hover:bg-green-500/10 hover:text-green-600 rounded-lg text-muted-foreground transition-colors disabled:opacity-40">
+                                {busyId === test.id
+                                  ? <Loader2 className="w-4 h-4 animate-spin" />
+                                  : <RotateCcw className="w-4 h-4" />}
+                              </button>
+                              <button
+                                onClick={() => setForceTarget(test)}
+                                title="Force delete (permanent)"
+                                className="p-1.5 hover:bg-red-500/10 hover:text-red-500 rounded-lg text-muted-foreground transition-colors">
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </>
                           )}
-                          <button
-                            onClick={() => handleDelete(test.id, test.title)}
-                            disabled={deletingId === test.id}
-                            title="Delete test"
-                            className="p-1.5 hover:bg-red-500/10 hover:text-red-500 rounded-lg text-muted-foreground transition-colors disabled:opacity-40">
-                            {deletingId === test.id
-                              ? <Loader2 className="w-4 h-4 animate-spin" />
-                              : <Trash2 className="w-4 h-4" />}
-                          </button>
                         </div>
                       </td>
                     </tr>

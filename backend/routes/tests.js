@@ -42,13 +42,16 @@ function normalizeCorrectAnswer(val, type) {
   return s;
 }
 
-// GET /api/tests — list by institution + optional batch filter
-// Optional query params: ?limit=N&page=N (default: all up to 500 per page).
+// GET /api/tests — list by institution + optional filters.
+// ?archived=true  → return only archived tests (admin/faculty/super-admin only).
+// Default         → return only active (non-archived) tests.
+// Optional query params: ?limit=N&page=N&batch_id=&type=&status=
 router.get("/", authenticate, async (req, res, next) => {
   try {
     const limit  = req.query.limit ? Math.min(500, Math.max(1, parseInt(req.query.limit, 10) || 500)) : 500;
     const page   = req.query.page  ? Math.max(1, parseInt(req.query.page,  10) || 1) : 1;
     const offset = (page - 1) * limit;
+    const showArchived = req.query.archived === "true" && req.user.role !== "student";
 
     let query = supabase.from("tests").select(`
       *,
@@ -61,11 +64,14 @@ router.get("/", authenticate, async (req, res, next) => {
       query = query.eq("institution_id", req.user.institution_id);
     }
 
+    // Always scope by archive state so neither half leaks into the other view
+    query = query.eq("is_archived", showArchived);
+
     if (req.query.batch_id) query = query.eq("batch_id", req.query.batch_id);
     if (req.query.type)     query = query.eq("type", req.query.type);
     if (req.query.status)   query = query.eq("status", req.query.status);
 
-    // Students only see published tests
+    // Students only see published (active) tests
     if (req.user.role === "student") {
       query = query.eq("status", "published");
     }
@@ -504,7 +510,8 @@ router.get("/:id", authenticate, async (req, res, next) => {
     if (error || !data) return res.status(404).json({ error: "Test not found" });
 
     if (req.user.role === "student") {
-      if (data.status !== "published") {
+      // Students cannot see archived or unpublished tests
+      if (data.is_archived || data.status !== "published") {
         return res.status(404).json({ error: "Test not found" });
       }
 
@@ -919,55 +926,184 @@ router.put(
   }
 );
 
-// DELETE /api/tests/:id — delete test
+// DELETE /api/tests/:id — soft delete (archive).
+// Sets is_archived=true. Preserves all attempts, scores, and analytics.
+// Students immediately lose access; admin/faculty can restore or view analytics.
 router.delete(
   "/:id",
   authenticate,
   requireRole("admin", "faculty", "super-admin"),
   async (req, res, next) => {
     try {
-      // Get test details before deletion — scoped to institution
-      let fetchQuery = supabase
+      let query = supabase
         .from("tests")
-        .select("title, created_by")
+        .update({
+          is_archived: true,
+          archived_at: new Date().toISOString(),
+          archived_by: req.user.id,
+        })
+        .eq("id", req.params.id)
+        .eq("is_archived", false); // idempotency guard
+
+      if (req.user.role !== "super-admin") {
+        query = query.eq("institution_id", req.user.institution_id);
+      }
+
+      const { data, error } = await query.select("id, title").single();
+      if (error || !data) return res.status(404).json({ error: "Test not found or already archived" });
+
+      // Invalidate cached student paper so they can no longer load it
+      redis.del(`test:paper:${req.params.id}`).catch(() => {});
+
+      // Audit log
+      try {
+        const { logAudit } = require("../lib/audit");
+        await logAudit(req, req.user, "test_archive", "tests", data.id, "warn", "success", { title: data.title });
+      } catch (_) {}
+
+      return res.json({ data: { message: "Test archived", id: data.id } });
+    } catch (err) {
+      return next(err);
+    }
+  }
+);
+
+// PUT /api/tests/:id/restore — restore a previously archived test.
+// Returns the test to its pre-archive status (draft/published/completed unchanged).
+router.put(
+  "/:id/restore",
+  authenticate,
+  requireRole("admin", "super-admin"),
+  async (req, res, next) => {
+    try {
+      let query = supabase
+        .from("tests")
+        .update({ is_archived: false, archived_at: null, archived_by: null })
+        .eq("id", req.params.id)
+        .eq("is_archived", true); // only operate on archived tests
+
+      if (req.user.role !== "super-admin") {
+        query = query.eq("institution_id", req.user.institution_id);
+      }
+
+      const { data, error } = await query.select("id, title, status").single();
+      if (error || !data) return res.status(404).json({ error: "Archived test not found" });
+
+      // Re-cache if it was published (students should be able to load it again)
+      redis.del(`test:paper:${req.params.id}`).catch(() => {});
+
+      try {
+        const { logAudit } = require("../lib/audit");
+        await logAudit(req, req.user, "test_restore", "tests", data.id, "info", "success", { title: data.title });
+      } catch (_) {}
+
+      return res.json({ data: { message: "Test restored", id: data.id, status: data.status } });
+    } catch (err) {
+      return next(err);
+    }
+  }
+);
+
+// DELETE /api/tests/:id/force — permanent deletion.
+// Removes all dependent records in FK-safe order:
+//   test_answers → test_attempts → test_questions → tests + calendar_event
+// Requires admin/super-admin. Requires confirmation token in body: { confirm: "FORCE_DELETE" }.
+router.delete(
+  "/:id/force",
+  authenticate,
+  requireRole("admin", "super-admin"),
+  async (req, res, next) => {
+    if (req.body?.confirm !== "FORCE_DELETE") {
+      return res.status(400).json({
+        error: 'Pass { "confirm": "FORCE_DELETE" } in the request body to confirm permanent deletion.',
+      });
+    }
+
+    try {
+      // Verify ownership before touching anything
+      let testQuery = supabase
+        .from("tests")
+        .select("id, title, created_by")
         .eq("id", req.params.id);
       if (req.user.role !== "super-admin") {
-        fetchQuery = fetchQuery.eq("institution_id", req.user.institution_id);
+        testQuery = testQuery.eq("institution_id", req.user.institution_id);
       }
-      const { data: test } = await fetchQuery.single();
+      const { data: test, error: testErr } = await testQuery.single();
+      if (testErr || !test) return res.status(404).json({ error: "Test not found" });
 
-      // Delete associated calendar event
-      if (test) {
-        try {
-          const { data: calEvent } = await supabase
-            .from("calendar_events")
-            .select("id")
-            .textSearch("title", test.title)
-            .eq("type", "exam")
-            .eq("created_by", test.created_by)
-            .limit(1)
-            .maybeSingle();
+      // 1. Collect all attempt IDs for this test
+      const { data: attempts } = await supabase
+        .from("test_attempts")
+        .select("id")
+        .eq("test_id", req.params.id);
 
-          if (calEvent) {
-            await supabase
-              .from("calendar_events")
-              .delete()
-              .eq("id", calEvent.id);
-          }
-        } catch (calErr) {
-          console.error("[tests] calendar event deletion error:", calErr.message);
+      const attemptIds = (attempts || []).map((a) => a.id);
+
+      // 2. Delete test_answers (child of test_attempts)
+      if (attemptIds.length > 0) {
+        const { error: ansErr } = await supabase
+          .from("test_answers")
+          .delete()
+          .in("attempt_id", attemptIds);
+        if (ansErr) return res.status(500).json({ error: "Failed to delete answers: " + ansErr.message });
+      }
+
+      // 3. Delete test_attempts
+      const { error: attErr } = await supabase
+        .from("test_attempts")
+        .delete()
+        .eq("test_id", req.params.id);
+      if (attErr) return res.status(500).json({ error: "Failed to delete attempts: " + attErr.message });
+
+      // 4. Delete test_questions
+      const { error: qErr } = await supabase
+        .from("test_questions")
+        .delete()
+        .eq("test_id", req.params.id);
+      if (qErr) return res.status(500).json({ error: "Failed to delete questions: " + qErr.message });
+
+      // 5. Delete associated calendar event (best-effort)
+      try {
+        const { data: calEvent } = await supabase
+          .from("calendar_events")
+          .select("id")
+          .eq("created_by", test.created_by)
+          .eq("type", "exam")
+          .textSearch("title", test.title)
+          .limit(1)
+          .maybeSingle();
+        if (calEvent) {
+          await supabase.from("calendar_events").delete().eq("id", calEvent.id);
         }
+      } catch (calErr) {
+        console.error("[tests] force-delete calendar event error:", calErr.message);
       }
 
-      // Delete test — scoped to institution
-      let deleteQuery = supabase.from("tests").delete().eq("id", req.params.id);
+      // 6. Delete the test itself
+      let delQuery = supabase.from("tests").delete().eq("id", req.params.id);
       if (req.user.role !== "super-admin") {
-        deleteQuery = deleteQuery.eq("institution_id", req.user.institution_id);
+        delQuery = delQuery.eq("institution_id", req.user.institution_id);
       }
-      const { error } = await deleteQuery;
+      const { error: delErr } = await delQuery;
+      if (delErr) return res.status(500).json({ error: "Failed to delete test: " + delErr.message });
 
-      if (error) return res.status(400).json({ error: error.message });
-      return res.json({ data: { message: "Test deleted" } });
+      // Evict any cached paper
+      redis.del(`test:paper:${req.params.id}`).catch(() => {});
+
+      try {
+        const { logAudit } = require("../lib/audit");
+        await logAudit(req, req.user, "test_force_delete", "tests", req.params.id, "warn", "success", {
+          title: test.title,
+          attempts_deleted: attemptIds.length,
+        });
+      } catch (_) {}
+
+      return res.json({
+        data: {
+          message: "Test permanently deleted",
+          attempts_deleted: attemptIds.length,
+        },
+      });
     } catch (err) {
       return next(err);
     }

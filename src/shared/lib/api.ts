@@ -267,7 +267,7 @@ export const uploadCourseFile = async (file: File, folder = "course-content"): P
 
 // ── Tests ────────────────────────────────────────────────────────────────────
 
-export const getTests = (params?: { batch_id?: string; type?: string; status?: string }) => {
+export const getTests = (params?: { batch_id?: string; type?: string; status?: string; archived?: string }) => {
   const qs = params
     ? "?" + new URLSearchParams(params as Record<string, string>).toString()
     : "";
@@ -315,8 +315,17 @@ export const updateTest = (
   }
 ) => apiFetch(`/api/tests/${testId}`, { method: "PUT", body: JSON.stringify(payload) });
 
-export const deleteTest = (testId: string) =>
+export const archiveTest = (testId: string) =>
   apiFetch(`/api/tests/${testId}`, { method: "DELETE" });
+
+export const restoreTest = (testId: string) =>
+  apiFetch(`/api/tests/${testId}/restore`, { method: "PUT" });
+
+export const forceDeleteTest = (testId: string) =>
+  apiFetch(`/api/tests/${testId}/force`, {
+    method: "DELETE",
+    body: JSON.stringify({ confirm: "FORCE_DELETE" }),
+  });
 
 export const getTestAttempts = (testId: string) =>
   apiFetch(`/api/tests/${testId}/attempts`);
