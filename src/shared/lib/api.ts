@@ -146,6 +146,25 @@ export const bulkCreateStudents = (
     body: JSON.stringify({ students, default_password }),
   });
 
+export const importNominalRoll = (payload: {
+  students: { roll_no: string; name: string; section?: string; branch?: string }[];
+  email_domain: string;
+  password_mode: "roll_no" | "custom";
+  default_password?: string;
+  batch_id?: string;
+}) =>
+  apiFetch<{
+    total: number;
+    created: number;
+    already_existed: number;
+    failed: number;
+    batch_assigned: number;
+    failures: { roll_no: string; email?: string; reason: string }[];
+  }>("/api/users/nominal-roll", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+
 export const updateUser = (id: string, payload: Record<string, unknown>) =>
   apiFetch(`/api/users/${id}`, { method: "PUT", body: JSON.stringify(payload) });
 

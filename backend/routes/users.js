@@ -191,6 +191,227 @@ router.post(
   }
 );
 
+// POST /api/users/nominal-roll — bulk onboard students from a college nominal roll CSV.
+//
+// Accepts { students, email_domain, password_mode, default_password?, batch_id? }.
+// Generates email as  <sanitised_roll_no>@<email_domain>.
+// Sets password to the roll number (password_mode="roll_no") or a custom value.
+// Skips duplicate Supabase auth users (counts them as already_existed) rather than failing.
+// Optionally auto-assigns every student (new + pre-existing) to batch_id.
+// Cap: 400 students per call — frontend must chunk larger files.
+router.post(
+  "/nominal-roll",
+  authenticate,
+  requireRole("admin", "super-admin"),
+  async (req, res, next) => {
+    const {
+      students,
+      email_domain,
+      password_mode,
+      default_password,
+      batch_id,
+    } = req.body;
+
+    // ── Input validation ─────────────────────────────────────────────────────
+    if (!Array.isArray(students) || students.length === 0) {
+      return res.status(400).json({ error: "students array is required" });
+    }
+    if (students.length > 400) {
+      return res.status(400).json({ error: "Maximum 400 students per request — split into batches on the client." });
+    }
+    if (!email_domain || !/^[a-zA-Z0-9][a-zA-Z0-9.-]*\.[a-zA-Z]{2,}$/.test(email_domain)) {
+      return res.status(400).json({ error: "email_domain is required (e.g. cmrtc.edu.in)" });
+    }
+    if (password_mode === "custom" && (!default_password || default_password.length < 6)) {
+      return res.status(400).json({ error: "default_password must be at least 6 characters when password_mode is 'custom'" });
+    }
+
+    // ── Build and validate records ────────────────────────────────────────────
+    const failures = [];
+    const valid    = [];
+    const seenEmails = new Set();
+
+    for (let i = 0; i < students.length; i++) {
+      const s      = students[i];
+      const rollNo = String(s.roll_no || "").trim().toUpperCase();
+      const name   = String(s.name   || "").trim();
+
+      if (!rollNo) {
+        failures.push({ roll_no: "(empty)", reason: `Row ${i + 1}: roll number is required` });
+        continue;
+      }
+      if (!name) {
+        failures.push({ roll_no: rollNo, reason: "Student name is required" });
+        continue;
+      }
+
+      // Sanitise roll number for use as email local-part.
+      // JNTUH roll nos are alphanumeric (e.g. 21N81A0501) — safe after lowercase.
+      const localPart = rollNo.toLowerCase().replace(/[^a-z0-9._-]/g, "");
+      if (!localPart) {
+        failures.push({ roll_no: rollNo, reason: "Roll number cannot be converted to a valid email local-part" });
+        continue;
+      }
+
+      const email    = `${localPart}@${email_domain}`;
+      const password = password_mode === "custom" ? default_password : rollNo;
+
+      if (seenEmails.has(email)) {
+        failures.push({ roll_no: rollNo, email, reason: "Duplicate roll number in this batch" });
+        continue;
+      }
+      seenEmails.add(email);
+
+      valid.push({
+        rollNo,
+        name,
+        email,
+        password,
+        section: String(s.section || "").trim() || null,
+        branch:  String(s.branch  || "").trim() || null,
+      });
+    }
+
+    // ── Create Supabase auth users in parallel batches of 10 ─────────────────
+    const AUTH_BATCH = 10;
+    const authCreated          = [];  // { rollNo, name, email, userId, section, branch }
+    const alreadyExistedEmails = new Set();
+    let   alreadyExistedCount  = 0;
+
+    for (let i = 0; i < valid.length; i += AUTH_BATCH) {
+      const chunk = valid.slice(i, i + AUTH_BATCH);
+      const results = await Promise.all(
+        chunk.map(async (s) => {
+          try {
+            const { data: authData, error: authError } = await supabase.auth.admin.createUser({
+              email:         s.email,
+              password:      s.password,
+              email_confirm: true,
+              user_metadata: {
+                name:    s.name,
+                role:    "student",
+                roll_no: s.rollNo,
+                section: s.section,
+                branch:  s.branch,
+              },
+            });
+
+            if (authError) {
+              // HTTP 422 / "already registered" → not a real failure, student exists
+              if (authError.status === 422 || /already/i.test(authError.message || "")) {
+                alreadyExistedEmails.add(s.email);
+                alreadyExistedCount++;
+                return null;
+              }
+              failures.push({ roll_no: s.rollNo, email: s.email, reason: authError.message });
+              return null;
+            }
+
+            return { ...s, userId: authData.user.id };
+          } catch (err) {
+            failures.push({ roll_no: s.rollNo, email: s.email, reason: err.message });
+            return null;
+          }
+        })
+      );
+      authCreated.push(...results.filter(Boolean));
+    }
+
+    // ── Batch upsert profiles for newly created auth users ────────────────────
+    let createdCount      = 0;
+    const createdProfileIds = [];
+
+    if (authCreated.length > 0) {
+      const profileRows = authCreated.map((s) => ({
+        id:             s.userId,
+        email:          s.email,
+        name:           s.name,
+        role:           "student",
+        institution_id: req.user.institution_id,
+      }));
+
+      const { data: profiles, error: profileErr } = await supabase
+        .from("profiles")
+        .upsert(profileRows)
+        .select("id");
+
+      if (profileErr) {
+        for (const s of authCreated) {
+          failures.push({ roll_no: s.rollNo, email: s.email, reason: `Profile insert failed: ${profileErr.message}` });
+        }
+      } else {
+        createdCount = (profiles || []).length;
+        createdProfileIds.push(...(profiles || []).map((p) => p.id));
+      }
+    }
+
+    // ── Auto-assign to batch ──────────────────────────────────────────────────
+    // Assigns both newly created AND pre-existing students so re-running the import
+    // still batch-assigns everyone even if their auth accounts already existed.
+    let batchAssigned = 0;
+    if (batch_id && (createdProfileIds.length > 0 || alreadyExistedEmails.size > 0)) {
+      try {
+        let allStudentIds = [...createdProfileIds];
+
+        if (alreadyExistedEmails.size > 0) {
+          const { data: existing } = await supabase
+            .from("profiles")
+            .select("id")
+            .in("email", [...alreadyExistedEmails])
+            .eq("institution_id", req.user.institution_id);
+          if (existing) allStudentIds.push(...existing.map((p) => p.id));
+        }
+
+        if (allStudentIds.length > 0) {
+          const batchRows = allStudentIds.map((student_id) => ({ batch_id, student_id }));
+          const { error: batchErr } = await supabase
+            .from("batch_students")
+            .upsert(batchRows, { onConflict: "batch_id,student_id" });
+
+          if (!batchErr) {
+            batchAssigned = allStudentIds.length;
+
+            // Fire-and-forget: enroll all students in courses already assigned to this batch
+            supabase
+              .from("batch_courses")
+              .select("course_id")
+              .eq("batch_id", batch_id)
+              .then(({ data: courses }) => {
+                if (!courses || courses.length === 0) return;
+                const enrollRows = [];
+                for (const sid of allStudentIds) {
+                  for (const { course_id } of courses) {
+                    enrollRows.push({ course_id, student_id: sid });
+                  }
+                }
+                if (enrollRows.length > 0) {
+                  supabase
+                    .from("enrollments")
+                    .upsert(enrollRows, { onConflict: "course_id,student_id" })
+                    .catch((err) => console.error("[nominal-roll] enrollment fire-and-forget:", err.message));
+                }
+              })
+              .catch((err) => console.error("[nominal-roll] batch courses fetch:", err.message));
+          }
+        }
+      } catch (batchErr) {
+        console.error("[nominal-roll] batch assignment error:", batchErr.message);
+      }
+    }
+
+    return res.status(201).json({
+      data: {
+        total:           students.length,
+        created:         createdCount,
+        already_existed: alreadyExistedCount,
+        failed:          failures.length,
+        batch_assigned:  batchAssigned,
+        failures,
+      },
+    });
+  }
+);
+
 // PUT /api/users/:id — update user profile (own or admin/faculty)
 router.put("/:id", authenticate, async (req, res, next) => {
   if (

@@ -1,15 +1,16 @@
 import { useState, useEffect, useRef } from "react";
 import {
   Users, UserPlus, Search, X, ChevronLeft, ChevronRight,
-  Loader2, AlertCircle, Upload, FileText, Trash2, Pencil,
+  Loader2, AlertCircle, Upload, Trash2, Pencil,
   CheckCircle, Key, Calendar, Layers, ChevronDown,
+  Download, AlertTriangle, FileSpreadsheet,
 } from "lucide-react";
 import type { UserType } from "@/shared/userTypes";
 import { PageHeader } from "@/shared/components/PageHeader";
 import { StatCard } from "@/shared/components/StatCard";
 import { Button } from "@/shared/components/ui/button";
 import {
-  getUsers, getUser, createUser, updateUser, deleteUser, bulkCreateStudents,
+  getUsers, getUser, createUser, updateUser, deleteUser, getBatches, importNominalRoll,
 } from "@/shared/lib/api";
 import { toast } from "sonner";
 
@@ -36,8 +37,6 @@ interface StudentDetail extends ApiStudent {
   batch_students: BatchEntry[];
 }
 
-interface CSVRow { name: string; email: string }
-
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 const PAGE_SIZE = 12;
@@ -52,23 +51,153 @@ function initial(name: string) {
   return (name || "?").charAt(0).toUpperCase();
 }
 
-function parseStudentsCSV(text: string): { rows: CSVRow[]; errors: string[] } {
-  const lines = text.split(/[\r\n]+/).map(l => l.trim()).filter(Boolean);
-  const rows: CSVRow[] = [];
-  const errors: string[] = [];
+// ── Nominal Roll CSV Parser ───────────────────────────────────────────────────
 
-  let start = 0;
-  if (lines[0] && /name|email/i.test(lines[0])) start = 1;
+interface NominalRow {
+  rollNo:  string;
+  name:    string;
+  section: string;
+  branch:  string;
+}
 
-  for (let i = start; i < lines.length; i++) {
-    const parts = lines[i].split(",").map(p => p.trim().replace(/^["']|["']$/g, ""));
-    const name = parts[0];
-    const email = (parts[1] || "").toLowerCase();
-    if (!name || !email) { errors.push(`Row ${i + 1}: missing name or email`); continue; }
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { errors.push(`Row ${i + 1}: invalid email "${email}"`); continue; }
-    rows.push({ name, email });
+interface ParseResult {
+  rows:       NominalRow[];
+  errors:     string[];
+  headers:    string[];
+  colIndices: { rollNo: number; name: number; section: number; branch: number };
+  detected:   boolean;
+}
+
+// Flexible regex patterns for JNTUH and other nominal roll formats
+const COL_PATTERNS = {
+  rollNo:  [/roll\s*[\.\-]?\s*no/i, /roll\s*number/i, /jntuh/i, /regd?\s*[\.\-]?\s*no/i, /enrollment\s*no/i, /hall\s*ticket/i, /\bhtno\b/i, /\broll\b/i],
+  name:    [/candidate\s*name/i, /student\s*name/i, /full\s*name/i, /\bname\b/i],
+  section: [/section/i, /\bsec\b/i, /division/i],
+  branch:  [/branch/i, /\bdept\b/i, /department/i, /stream/i, /specialization/i, /programme?/i],
+};
+
+function parseCSVLine(line: string): string[] {
+  const result: string[] = [];
+  let current = "";
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"') {
+      if (inQuotes && line[i + 1] === '"') { current += '"'; i++; }
+      else inQuotes = !inQuotes;
+    } else if (ch === "," && !inQuotes) {
+      result.push(current.trim());
+      current = "";
+    } else {
+      current += ch;
+    }
   }
-  return { rows, errors };
+  result.push(current.trim());
+  return result;
+}
+
+function detectColIndices(headers: string[]) {
+  const find = (patterns: RegExp[]) =>
+    headers.findIndex(h => patterns.some(p => p.test(h.trim())));
+  return {
+    rollNo:  find(COL_PATTERNS.rollNo),
+    name:    find(COL_PATTERNS.name),
+    section: find(COL_PATTERNS.section),
+    branch:  find(COL_PATTERNS.branch),
+  };
+}
+
+function parseNominalRollCSV(text: string): ParseResult {
+  // Strip BOM, normalise line endings
+  const cleaned = text.replace(/^﻿/, "").replace(/\r\n?/g, "\n");
+  const allLines = cleaned.split("\n").map(l => l.trim()).filter(Boolean);
+
+  if (allLines.length === 0) {
+    return { rows: [], errors: ["File is empty"], headers: [], colIndices: { rollNo: -1, name: -1, section: -1, branch: -1 }, detected: false };
+  }
+
+  // Scan up to the first 6 lines to find a header row that has both roll & name columns
+  let headerLineIdx = -1;
+  let colIndices = { rollNo: -1, name: -1, section: -1, branch: -1 };
+  let headers: string[] = [];
+
+  for (let i = 0; i < Math.min(allLines.length, 6); i++) {
+    const parts = parseCSVLine(allLines[i]);
+    const detected = detectColIndices(parts);
+    if (detected.rollNo !== -1 && detected.name !== -1) {
+      headerLineIdx = i;
+      colIndices    = detected;
+      headers       = parts;
+      break;
+    }
+  }
+
+  if (headerLineIdx === -1) {
+    return {
+      rows: [],
+      errors: [
+        "Could not detect column headers. Ensure your CSV contains columns named 'Roll No' (or 'JNTUH Roll No', 'Regd No') and 'Name' (or 'Student Name', 'Candidate Name').",
+        `First row found: ${parseCSVLine(allLines[0]).join(" | ")}`,
+      ],
+      headers: parseCSVLine(allLines[0]),
+      colIndices,
+      detected: false,
+    };
+  }
+
+  const rows: NominalRow[] = [];
+  const errors: string[]   = [];
+
+  for (let i = headerLineIdx + 1; i < allLines.length; i++) {
+    const parts = parseCSVLine(allLines[i]);
+    if (parts.every(p => !p)) continue;
+
+    const rollNo  = (parts[colIndices.rollNo]  ?? "").trim().toUpperCase();
+    const name    = (parts[colIndices.name]    ?? "").trim();
+    const section = colIndices.section >= 0 ? (parts[colIndices.section] ?? "").trim() : "";
+    const branch  = colIndices.branch  >= 0 ? (parts[colIndices.branch]  ?? "").trim() : "";
+
+    if (!rollNo && !name) continue; // blank data row between sections
+
+    if (!rollNo) {
+      errors.push(`Row ${i + 1}: "${name}" — missing roll number`);
+      continue;
+    }
+    if (!name) {
+      errors.push(`Row ${i + 1}: roll ${rollNo} — missing student name`);
+      continue;
+    }
+
+    rows.push({ rollNo, name, section, branch });
+  }
+
+  return { rows, errors, headers, colIndices, detected: true };
+}
+
+function generateEmail(rollNo: string, domain: string): string {
+  return `${rollNo.toLowerCase().replace(/[^a-z0-9._-]/g, "")}@${domain}`;
+}
+
+// Turns failures array into a downloadable CSV
+function downloadFailuresCSV(failures: { roll_no: string; email?: string; reason: string }[]) {
+  const header = "Roll No,Email,Reason\n";
+  const rows   = failures.map(f =>
+    `"${f.roll_no}","${f.email ?? ""}","${f.reason.replace(/"/g, "'")}"`
+  ).join("\n");
+  const blob = new Blob([header + rows], { type: "text/csv" });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement("a");
+  a.href = url; a.download = "import-failures.csv"; a.click();
+  URL.revokeObjectURL(url);
+}
+
+interface ImportSummary {
+  total:           number;
+  created:         number;
+  already_existed: number;
+  failed:          number;
+  batch_assigned:  number;
+  failures:        { roll_no: string; email?: string; reason: string }[];
 }
 
 // ── Add Student Modal ─────────────────────────────────────────────────────────
@@ -139,145 +268,398 @@ function AddStudentModal({ onClose, onCreated }: { onClose: () => void; onCreate
   );
 }
 
-// ── CSV Import Modal ──────────────────────────────────────────────────────────
+// ── Nominal Roll Import Modal ─────────────────────────────────────────────────
 
-function CSVImportModal({ onClose, onImported }: { onClose: () => void; onImported: () => void }) {
-  const [rawText, setRawText] = useState("");
-  const [parsed, setParsed] = useState<{ rows: CSVRow[]; errors: string[] }>({ rows: [], errors: [] });
-  const [password, setPassword] = useState("Welcome@123");
-  const [importing, setImporting] = useState(false);
-  const [result, setResult] = useState<{ created: number; failed: { email: string; reason: string }[] } | null>(null);
+const CHUNK_SIZE = 300; // students per API call — safe within Vercel's 60 s limit
+
+function NominalRollImportModal({ onClose, onImported }: { onClose: () => void; onImported: () => void }) {
+  type Step = "setup" | "importing" | "done";
+
+  const [step,          setStep]          = useState<Step>("setup");
+  const [parseResult,   setParseResult]   = useState<ParseResult | null>(null);
+  const [emailDomain,   setEmailDomain]   = useState("cmrtc.edu.in");
+  const [passwordMode,  setPasswordMode]  = useState<"roll_no" | "custom">("roll_no");
+  const [customPass,    setCustomPass]    = useState("");
+  const [batchId,       setBatchId]       = useState("");
+  const [batches,       setBatches]       = useState<{ id: string; name: string }[]>([]);
+  const [progress,      setProgress]      = useState({ done: 0, total: 0, batchNum: 0, totalBatches: 0 });
+  const [summary,       setSummary]       = useState<ImportSummary | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const handleText = (text: string) => {
-    setRawText(text);
-    setParsed(parseStudentsCSV(text));
-    setResult(null);
-  };
+  useEffect(() => {
+    getBatches().then(({ data }) => {
+      if (data) setBatches((data as { id: string; name: string; status?: string }[]).filter(b => b.name));
+    });
+  }, []);
 
   const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (!file.name.toLowerCase().endsWith(".csv")) {
+      toast.error("Only .csv files are supported. Convert your Excel file to CSV first.");
+      return;
+    }
     const reader = new FileReader();
-    reader.onload = ev => handleText(ev.target?.result as string);
+    reader.onload = ev => {
+      const result = parseNominalRollCSV(ev.target?.result as string);
+      setParseResult(result);
+      if (!result.detected) toast.error(result.errors[0] ?? "Column detection failed");
+    };
     reader.readAsText(file);
+    // reset so the same file can be re-selected after changes
+    e.target.value = "";
   };
 
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const file = e.dataTransfer.files[0];
+    if (file) {
+      const fakeEvent = { target: { files: [file], value: "" } } as unknown as React.ChangeEvent<HTMLInputElement>;
+      handleFile(fakeEvent);
+    }
+  };
+
+  const validRows  = parseResult?.rows ?? [];
+  const parseErrors = parseResult?.errors ?? [];
+  const canImport  = validRows.length > 0 && parseResult?.detected &&
+                     emailDomain.trim() &&
+                     (passwordMode === "roll_no" || customPass.length >= 6);
+
   const handleImport = async () => {
-    if (parsed.rows.length === 0) { toast.error("No valid rows to import"); return; }
-    if (!password || password.length < 6) { toast.error("Password must be at least 6 characters"); return; }
-    setImporting(true);
-    const { data, error } = await bulkCreateStudents(parsed.rows, password);
-    setImporting(false);
-    if (error) { toast.error(error); return; }
-    const res = data as { created: { id: string }[]; failed: { email: string; reason: string }[] };
-    setResult({ created: res.created.length, failed: res.failed });
-    if (res.created.length > 0) {
-      toast.success(`${res.created.length} student${res.created.length !== 1 ? "s" : ""} created!`);
+    if (!canImport) return;
+
+    const totalBatches = Math.ceil(validRows.length / CHUNK_SIZE);
+    setProgress({ done: 0, total: validRows.length, batchNum: 0, totalBatches });
+    setStep("importing");
+
+    const accumulated: ImportSummary = {
+      total: validRows.length, created: 0, already_existed: 0,
+      failed: 0, batch_assigned: 0, failures: [],
+    };
+
+    for (let bIdx = 0; bIdx < totalBatches; bIdx++) {
+      const chunk = validRows.slice(bIdx * CHUNK_SIZE, (bIdx + 1) * CHUNK_SIZE);
+      setProgress(p => ({ ...p, batchNum: bIdx + 1 }));
+
+      const { data, error } = await importNominalRoll({
+        students: chunk.map(r => ({
+          roll_no: r.rollNo,
+          name:    r.name,
+          section: r.section || undefined,
+          branch:  r.branch  || undefined,
+        })),
+        email_domain:     emailDomain.trim(),
+        password_mode:    passwordMode,
+        default_password: passwordMode === "custom" ? customPass : undefined,
+        batch_id:         batchId || undefined,
+      });
+
+      if (error) {
+        toast.error(`Batch ${bIdx + 1} failed: ${error}`);
+        // Record entire chunk as failed but continue with remaining batches
+        accumulated.failed   += chunk.length;
+        accumulated.failures.push(...chunk.map(r => ({ roll_no: r.rollNo, reason: error })));
+      } else if (data) {
+        accumulated.created         += data.created;
+        accumulated.already_existed += data.already_existed;
+        accumulated.failed          += data.failed;
+        accumulated.batch_assigned  += data.batch_assigned;
+        accumulated.failures.push(...data.failures);
+      }
+
+      setProgress(p => ({ ...p, done: Math.min(p.done + chunk.length, p.total) }));
+    }
+
+    setSummary(accumulated);
+    setStep("done");
+
+    if (accumulated.created > 0) {
+      toast.success(`${accumulated.created} student${accumulated.created !== 1 ? "s" : ""} created successfully!`);
       onImported();
     }
   };
 
+  const previewRows = validRows.slice(0, 8);
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-      <div className="bg-card border border-border rounded-xl w-full max-w-lg shadow-xl flex flex-col max-h-[85vh]">
-        <div className="flex items-center justify-between p-6 border-b border-border">
-          <h2 className="text-lg font-semibold text-foreground">Import Students via CSV</h2>
+      <div className="bg-card border border-border rounded-xl w-full max-w-2xl shadow-xl flex flex-col max-h-[90vh]">
+
+        {/* Header */}
+        <div className="flex items-center justify-between p-5 border-b border-border shrink-0">
+          <div className="flex items-center gap-2.5">
+            <FileSpreadsheet className="w-5 h-5 text-[var(--gold)]" />
+            <h2 className="text-lg font-semibold text-foreground">Import Nominal Roll</h2>
+          </div>
           <button onClick={onClose} className="text-muted-foreground hover:text-foreground"><X className="w-5 h-5" /></button>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-6 space-y-4">
-          {/* Upload zone */}
-          <div
-            className="border-2 border-dashed border-border rounded-lg p-6 text-center cursor-pointer hover:border-[var(--gold)] transition-colors"
-            onClick={() => fileRef.current?.click()}
-          >
-            <Upload className="w-7 h-7 mx-auto mb-2 text-muted-foreground" />
-            <p className="text-sm font-medium text-foreground">Click to upload CSV</p>
-            <p className="text-xs text-muted-foreground mt-0.5">Format: <code className="bg-muted px-1 rounded">name, email</code> — one row per student</p>
-            <input ref={fileRef} type="file" accept=".csv,.txt" className="hidden" onChange={handleFile} />
-          </div>
+        <div className="flex-1 overflow-y-auto">
 
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <div className="flex-1 border-t border-border" /><span>or paste rows</span><div className="flex-1 border-t border-border" />
-          </div>
+          {/* ── SETUP ── */}
+          {step === "setup" && (
+            <div className="p-5 space-y-5">
 
-          <textarea
-            value={rawText}
-            onChange={e => handleText(e.target.value)}
-            rows={5}
-            placeholder={"name,email\nAditya Singh,aditya@college.edu\nPriya Sharma,priya@college.edu"}
-            className="w-full rounded-md border border-border bg-background px-3 py-2 text-xs font-mono resize-none"
-          />
+              {/* Upload zone */}
+              <div
+                className="border-2 border-dashed border-border rounded-lg p-6 text-center cursor-pointer hover:border-[var(--gold)] transition-colors"
+                onClick={() => fileRef.current?.click()}
+                onDrop={handleDrop}
+                onDragOver={e => e.preventDefault()}
+              >
+                <Upload className="w-7 h-7 mx-auto mb-2 text-muted-foreground" />
+                <p className="text-sm font-medium text-foreground">
+                  {parseResult?.detected ? "File loaded — click to replace" : "Click or drag your CSV here"}
+                </p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  CSV only · Columns needed: <strong>Roll No</strong> and <strong>Name</strong>
+                  {" "}(Section and Branch are optional)
+                </p>
+                <input ref={fileRef} type="file" accept=".csv" className="hidden" onChange={handleFile} />
+              </div>
 
-          {/* Default password */}
-          <div>
-            <label className="text-xs font-medium text-muted-foreground">Default password for all students</label>
-            <div className="flex items-center gap-2 mt-1">
-              <Key className="w-4 h-4 text-muted-foreground shrink-0" />
-              <input value={password} onChange={e => setPassword(e.target.value)}
-                className="flex-1 rounded-md border border-border bg-background px-3 py-2 text-sm"
-                placeholder="Welcome@123" />
-            </div>
-            <p className="text-xs text-muted-foreground mt-1">Students should change this on first login.</p>
-          </div>
+              {/* Column detection result */}
+              {parseResult && (
+                <div className={`rounded-lg border p-3 text-sm ${parseResult.detected ? "border-[var(--gold)]/30 bg-[var(--gold-muted)]" : "border-red-500/30 bg-red-500/5"}`}>
+                  {parseResult.detected ? (
+                    <>
+                      <p className="font-medium text-foreground flex items-center gap-1.5">
+                        <CheckCircle className="w-4 h-4 text-[var(--gold)]" />
+                        {validRows.length} student{validRows.length !== 1 ? "s" : ""} detected
+                        {parseErrors.length > 0 && <span className="text-amber-500 ml-1">· {parseErrors.length} row{parseErrors.length !== 1 ? "s" : ""} skipped</span>}
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        Columns mapped — Roll No · Name
+                        {parseResult.colIndices.section >= 0 ? " · Section" : ""}
+                        {parseResult.colIndices.branch  >= 0 ? " · Branch"  : ""}
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <p className="font-medium text-red-500 flex items-center gap-1.5">
+                        <AlertTriangle className="w-4 h-4" /> Column detection failed
+                      </p>
+                      {parseErrors.map((e, i) => <p key={i} className="text-xs text-muted-foreground mt-0.5">{e}</p>)}
+                    </>
+                  )}
+                  {parseErrors.length > 0 && parseResult.detected && (
+                    <div className="mt-2 max-h-16 overflow-y-auto">
+                      {parseErrors.slice(0, 4).map((e, i) => <p key={i} className="text-xs text-muted-foreground">{e}</p>)}
+                      {parseErrors.length > 4 && <p className="text-xs text-muted-foreground">+{parseErrors.length - 4} more…</p>}
+                    </div>
+                  )}
+                </div>
+              )}
 
-          {/* Parse preview */}
-          {(parsed.rows.length > 0 || parsed.errors.length > 0) && !result && (
-            <div className="rounded-lg border border-border overflow-hidden text-sm">
-              {parsed.rows.length > 0 && (
-                <div className="p-3 bg-[var(--gold-muted)]">
-                  <p className="font-medium text-foreground">
-                    <CheckCircle className="inline w-4 h-4 text-[var(--gold)] mr-1" />
-                    {parsed.rows.length} valid row{parsed.rows.length !== 1 ? "s" : ""} ready to import
-                  </p>
-                  <div className="mt-1 max-h-20 overflow-y-auto">
-                    {parsed.rows.slice(0, 5).map((r, i) => (
-                      <p key={i} className="text-xs text-muted-foreground">{r.name} — {r.email}</p>
-                    ))}
-                    {parsed.rows.length > 5 && <p className="text-xs text-muted-foreground">+{parsed.rows.length - 5} more…</p>}
+              {/* Preview table */}
+              {parseResult?.detected && previewRows.length > 0 && (
+                <div className="rounded-lg border border-border overflow-hidden">
+                  <div className="px-3 py-2 bg-muted/30 border-b border-border">
+                    <p className="text-xs font-medium text-muted-foreground">Preview (first {previewRows.length} rows)</p>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="border-b border-border">
+                          <th className="text-left px-3 py-2 text-muted-foreground font-medium">Roll No</th>
+                          <th className="text-left px-3 py-2 text-muted-foreground font-medium">Name</th>
+                          <th className="text-left px-3 py-2 text-muted-foreground font-medium">Email (generated)</th>
+                          {previewRows.some(r => r.section) && <th className="text-left px-3 py-2 text-muted-foreground font-medium">Section</th>}
+                          {previewRows.some(r => r.branch)  && <th className="text-left px-3 py-2 text-muted-foreground font-medium">Branch</th>}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {previewRows.map((r, i) => (
+                          <tr key={i} className="border-b border-border last:border-0 hover:bg-accent/20">
+                            <td className="px-3 py-2 font-mono text-foreground">{r.rollNo}</td>
+                            <td className="px-3 py-2 text-foreground">{r.name}</td>
+                            <td className="px-3 py-2 text-muted-foreground font-mono">{generateEmail(r.rollNo, emailDomain || "domain.edu")}</td>
+                            {previewRows.some(r2 => r2.section) && <td className="px-3 py-2 text-muted-foreground">{r.section || "—"}</td>}
+                            {previewRows.some(r2 => r2.branch)  && <td className="px-3 py-2 text-muted-foreground">{r.branch  || "—"}</td>}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    {validRows.length > previewRows.length && (
+                      <p className="px-3 py-2 text-xs text-muted-foreground border-t border-border">
+                        +{validRows.length - previewRows.length} more rows not shown
+                      </p>
+                    )}
                   </div>
                 </div>
               )}
-              {parsed.errors.length > 0 && (
-                <div className="p-3 bg-red-500/5 border-t border-border">
-                  <p className="font-medium text-red-500 text-xs">{parsed.errors.length} row{parsed.errors.length !== 1 ? "s" : ""} skipped</p>
-                  {parsed.errors.slice(0, 3).map((e, i) => <p key={i} className="text-xs text-muted-foreground">{e}</p>)}
+
+              {/* Configuration */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* Email domain */}
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground">Email domain *</label>
+                  <input
+                    value={emailDomain}
+                    onChange={e => setEmailDomain(e.target.value.trim().toLowerCase())}
+                    placeholder="cmrtc.edu.in"
+                    className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm font-mono"
+                  />
+                  <p className="text-xs text-muted-foreground mt-1">Roll No + @ + domain = student email</p>
+                </div>
+
+                {/* Batch assignment */}
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground">Assign to batch (optional)</label>
+                  <select
+                    value={batchId}
+                    onChange={e => setBatchId(e.target.value)}
+                    className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+                  >
+                    <option value="">— No batch assignment —</option>
+                    {batches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                  </select>
+                  <p className="text-xs text-muted-foreground mt-1">Auto-enrolls in all batch courses</p>
+                </div>
+              </div>
+
+              {/* Password */}
+              <div>
+                <label className="text-xs font-medium text-muted-foreground block mb-2">Initial password</label>
+                <div className="space-y-2">
+                  <label className="flex items-center gap-2.5 cursor-pointer">
+                    <input
+                      type="radio"
+                      checked={passwordMode === "roll_no"}
+                      onChange={() => setPasswordMode("roll_no")}
+                      className="accent-[var(--gold)]"
+                    />
+                    <span className="text-sm text-foreground">Roll number <span className="text-muted-foreground text-xs">(e.g. 21N81A0501)</span></span>
+                  </label>
+                  <label className="flex items-center gap-2.5 cursor-pointer">
+                    <input
+                      type="radio"
+                      checked={passwordMode === "custom"}
+                      onChange={() => setPasswordMode("custom")}
+                      className="accent-[var(--gold)]"
+                    />
+                    <span className="text-sm text-foreground">Custom password</span>
+                  </label>
+                  {passwordMode === "custom" && (
+                    <div className="flex items-center gap-2 ml-6">
+                      <Key className="w-4 h-4 text-muted-foreground shrink-0" />
+                      <input
+                        value={customPass}
+                        onChange={e => setCustomPass(e.target.value)}
+                        placeholder="Min 6 characters"
+                        className="flex-1 rounded-md border border-border bg-background px-3 py-2 text-sm"
+                      />
+                    </div>
+                  )}
+                </div>
+                <p className="text-xs text-muted-foreground mt-1.5">Students must change their password on first login.</p>
+              </div>
+
+              {validRows.length > CHUNK_SIZE && (
+                <div className="flex items-start gap-2 rounded-lg bg-amber-500/10 border border-amber-500/20 px-3 py-2.5">
+                  <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
+                  <p className="text-xs text-amber-600 dark:text-amber-400">
+                    {validRows.length} students will be processed in {Math.ceil(validRows.length / CHUNK_SIZE)} batches of up to {CHUNK_SIZE}. This may take 1–2 minutes. Do not close this window.
+                  </p>
                 </div>
               )}
             </div>
           )}
 
-          {/* Import result */}
-          {result && (
-            <div className="rounded-lg border border-border p-4 space-y-2">
-              <p className="text-sm font-medium text-foreground">
-                <CheckCircle className="inline w-4 h-4 text-[var(--gold)] mr-1" />
-                {result.created} student{result.created !== 1 ? "s" : ""} created
-              </p>
-              {result.failed.length > 0 && (
-                <div>
-                  <p className="text-xs text-red-500 font-medium">{result.failed.length} failed:</p>
-                  {result.failed.map((f, i) => (
-                    <p key={i} className="text-xs text-muted-foreground">{f.email}: {f.reason}</p>
-                  ))}
+          {/* ── IMPORTING ── */}
+          {step === "importing" && (
+            <div className="p-8 flex flex-col items-center justify-center gap-5 min-h-[280px]">
+              <Loader2 className="w-10 h-10 animate-spin text-[var(--gold)]" />
+              <div className="w-full max-w-sm text-center space-y-3">
+                <p className="text-sm font-medium text-foreground">
+                  Processing batch {progress.batchNum} of {progress.totalBatches}…
+                </p>
+                {/* Progress bar */}
+                <div className="w-full h-2 bg-muted rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-[var(--gold)] rounded-full transition-all duration-300"
+                    style={{ width: `${progress.total > 0 ? Math.round((progress.done / progress.total) * 100) : 0}%` }}
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {progress.done} / {progress.total} students processed
+                </p>
+              </div>
+              <p className="text-xs text-muted-foreground">Do not close this window</p>
+            </div>
+          )}
+
+          {/* ── DONE ── */}
+          {step === "done" && summary && (
+            <div className="p-6 space-y-4">
+              <div className="flex items-center gap-2.5">
+                <CheckCircle className="w-6 h-6 text-[var(--gold)]" />
+                <h3 className="text-base font-semibold text-foreground">Import Complete</h3>
+              </div>
+
+              <div className="rounded-xl border border-border overflow-hidden">
+                <table className="w-full text-sm">
+                  <tbody>
+                    {[
+                      ["Total rows processed", summary.total],
+                      ["Successfully created", summary.created],
+                      ["Already existed (skipped)", summary.already_existed],
+                      ["Failed", summary.failed],
+                      ...(batchId ? [["Assigned to batch", summary.batch_assigned]] : []),
+                    ].map(([label, value], i) => (
+                      <tr key={i} className="border-b border-border last:border-0">
+                        <td className="px-4 py-2.5 text-muted-foreground">{label}</td>
+                        <td className="px-4 py-2.5 font-semibold text-foreground text-right">{value}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {summary.failures.length > 0 && (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs font-medium text-red-500 flex items-center gap-1">
+                      <AlertCircle className="w-3.5 h-3.5" /> {summary.failures.length} failure{summary.failures.length !== 1 ? "s" : ""}
+                    </p>
+                    <button
+                      onClick={() => downloadFailuresCSV(summary.failures)}
+                      className="flex items-center gap-1 text-xs text-[var(--gold)] hover:underline"
+                    >
+                      <Download className="w-3.5 h-3.5" /> Download CSV
+                    </button>
+                  </div>
+                  <div className="rounded-lg border border-border max-h-36 overflow-y-auto">
+                    {summary.failures.slice(0, 20).map((f, i) => (
+                      <div key={i} className="flex items-start gap-2 px-3 py-1.5 border-b border-border last:border-0">
+                        <span className="font-mono text-xs text-muted-foreground shrink-0">{f.roll_no}</span>
+                        <span className="text-xs text-red-500 min-w-0 break-words">{f.reason}</span>
+                      </div>
+                    ))}
+                    {summary.failures.length > 20 && (
+                      <p className="px-3 py-2 text-xs text-muted-foreground">+{summary.failures.length - 20} more — download CSV for full list</p>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
           )}
         </div>
 
-        <div className="p-4 border-t border-border flex gap-2">
-          {!result ? (
+        {/* Footer */}
+        <div className="p-4 border-t border-border shrink-0 flex gap-2">
+          {step === "setup" && (
             <>
-              <Button className="flex-1" onClick={handleImport}
-                disabled={importing || parsed.rows.length === 0}>
-                {importing && <Loader2 className="w-4 h-4 animate-spin mr-1" />}
-                Import {parsed.rows.length > 0 ? `${parsed.rows.length} Students` : "Students"}
+              <Button className="flex-1" onClick={handleImport} disabled={!canImport}>
+                Import {validRows.length > 0 ? `${validRows.length} Students` : "Students"}
               </Button>
               <Button variant="outline" onClick={onClose}>Cancel</Button>
             </>
-          ) : (
+          )}
+          {step === "importing" && (
+            <Button variant="outline" className="flex-1" disabled>Importing…</Button>
+          )}
+          {step === "done" && (
             <Button className="flex-1" onClick={onClose}>Done</Button>
           )}
         </div>
@@ -526,7 +908,7 @@ export function StudentsPage({ userType }: StudentsPageProps) {
   const [statusFilter, setStatusFilter] = useState("All");
   const [page, setPage] = useState(1);
   const [showAdd, setShowAdd] = useState(false);
-  const [showCSV, setShowCSV] = useState(false);
+  const [showNominalRoll, setShowNominalRoll] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const fetchStudents = async () => {
@@ -574,7 +956,7 @@ export function StudentsPage({ userType }: StudentsPageProps) {
   return (
     <div className="p-8">
       {showAdd && <AddStudentModal onClose={() => setShowAdd(false)} onCreated={fetchStudents} />}
-      {showCSV && <CSVImportModal onClose={() => setShowCSV(false)} onImported={fetchStudents} />}
+      {showNominalRoll && <NominalRollImportModal onClose={() => setShowNominalRoll(false)} onImported={fetchStudents} />}
       {selectedId && (
         <StudentDetailModal
           studentId={selectedId}
@@ -590,8 +972,8 @@ export function StudentsPage({ userType }: StudentsPageProps) {
         actions={
           <div className="flex items-center gap-2">
             {isAdmin && (
-              <Button size="sm" variant="outline" className="gap-2" onClick={() => setShowCSV(true)}>
-                <FileText className="size-4" /> Import CSV
+              <Button size="sm" variant="outline" className="gap-2" onClick={() => setShowNominalRoll(true)}>
+                <FileSpreadsheet className="size-4" /> Import Nominal Roll
               </Button>
             )}
             <Button size="sm" className="gap-2" onClick={() => setShowAdd(true)}>
