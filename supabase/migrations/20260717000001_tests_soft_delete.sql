@@ -8,7 +8,7 @@
 ALTER TABLE tests
   ADD COLUMN IF NOT EXISTS is_archived  BOOLEAN     NOT NULL DEFAULT FALSE,
   ADD COLUMN IF NOT EXISTS archived_at  TIMESTAMPTZ,
-  ADD COLUMN IF NOT EXISTS archived_by  UUID        REFERENCES profiles (id) ON DELETE SET NULL;
+  ADD COLUMN IF NOT EXISTS archived_by  UUID;
 
 -- Fast filter for the common query pattern: active tests by institution
 CREATE INDEX IF NOT EXISTS idx_tests_is_archived
