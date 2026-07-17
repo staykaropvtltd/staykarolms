@@ -84,7 +84,7 @@ function StreakWidget({ streak }: { streak: number }) {
           </div>
         ))}
       </div>
-      <p className="text-xs text-muted-foreground mt-3">🏆 Personal best: {Math.max(streak, 7)} days</p>
+      {streak > 0 && <p className="text-xs text-muted-foreground mt-3">Keep it up! Log in daily to build your streak.</p>}
     </div>
   );
 }
@@ -384,12 +384,11 @@ export function StudentDashboard() {
   const xpCurrent = enrolledCoursesCount * 1000 + completedTestsCount * 200;
   const xpLevel = Math.floor(xpCurrent / 2000) + 1;
   const xpNextLevel = xpLevel * 2000;
-  const streak = enrolledCoursesCount > 0 || completedTestsCount > 0 ? 3 : 0;
+  const streak = 0;
 
-  // Dynamic Badges Row
   const badges = [
-    { id: "1", title: "Early Bird", icon: "🌅", xp: 50, earned: completedTestsCount > 0 || assignments.length > 0 },
-    { id: "2", title: "Perfect Score", icon: "💯", xp: 100, earned: completedTestsCount > 0 },
+    { id: "1", title: "Early Bird", icon: "🌅", xp: 50, earned: false },
+    { id: "2", title: "Perfect Score", icon: "💯", xp: 100, earned: false },
     { id: "3", title: "Active Learner", icon: "🔥", xp: 150, earned: enrolledCoursesCount > 0 },
     { id: "4", title: "Course Explorer", icon: "🚀", xp: 200, earned: enrolledCoursesCount > 1 },
   ];

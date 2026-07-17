@@ -190,44 +190,8 @@ export function CertificateView() {
             </p>
           </div>
           
-          {/* Bottom Area (Stats & Badge) */}
-          <div className="relative z-10 flex justify-between items-end w-full px-8 mb-4">
-            
-            {/* Stats Row */}
-            <div className="flex gap-12 text-[#2a2a2a]">
-              <div className="flex flex-col items-center">
-                <div className="w-12 h-12 rounded-full flex items-center justify-center mb-2" style={{ backgroundColor: "#fdf8e9" }}>
-                  <span className="text-2xl">👑</span>
-                </div>
-                <span className="text-sm font-semibold tracking-wide text-[#666] uppercase">Rank</span>
-                <span className="text-xl font-bold font-serif">1st</span>
-              </div>
-              
-              <div className="flex flex-col items-center">
-                <div className="w-12 h-12 rounded-full flex items-center justify-center mb-2" style={{ backgroundColor: "#fdf8e9" }}>
-                  <span className="text-2xl">⚡</span>
-                </div>
-                <span className="text-sm font-semibold tracking-wide text-[#666] uppercase">XP Earned</span>
-                <span className="text-xl font-bold font-serif">25,000</span>
-              </div>
-              
-              <div className="flex flex-col items-center">
-                <div className="w-12 h-12 rounded-full flex items-center justify-center mb-2" style={{ backgroundColor: "#fdf8e9" }}>
-                  <span className="text-2xl">🔥</span>
-                </div>
-                <span className="text-sm font-semibold tracking-wide text-[#666] uppercase">Streak</span>
-                <span className="text-xl font-bold font-serif">120 Days</span>
-              </div>
-              
-              <div className="flex flex-col items-center">
-                <div className="w-12 h-12 rounded-full flex items-center justify-center mb-2" style={{ backgroundColor: "#fdf8e9" }}>
-                  <span className="text-2xl">🎯</span>
-                </div>
-                <span className="text-sm font-semibold tracking-wide text-[#666] uppercase">Score</span>
-                <span className="text-xl font-bold font-serif">98%</span>
-              </div>
-            </div>
-
+          {/* Bottom Area (Badge) */}
+          <div className="relative z-10 flex justify-end items-end w-full px-8 mb-4">
             {/* Seal / Badge */}
             <div className="relative flex flex-col items-center justify-center">
               <div className="w-32 h-32 rounded-full border-4 border-dashed flex items-center justify-center relative shadow-lg" style={{ borderColor: "#d4af37", backgroundColor: "#f8f0d8" }}>
@@ -239,7 +203,6 @@ export function CertificateView() {
                 </div>
               </div>
             </div>
-            
           </div>
           
           {/* Small Verification Text */}
@@ -250,7 +213,7 @@ export function CertificateView() {
       </div>
       
       <div className="text-center text-sm text-muted-foreground mt-4 max-w-lg">
-        This certificate is dynamically generated. Rank and XP are placeholder values for this template demonstration.
+        This certificate is dynamically generated and verifiable via the QR code.
       </div>
     </div>
   );

@@ -11,15 +11,6 @@ import { useAuth } from "@/shared/context/AuthContext";
 import { toast } from "sonner";
 import { CodingWorkspace } from "@/shared/components/CodingWorkspace";
 
-const FALLBACK_CODING_PROBLEM = {
-  id: "p1",
-  title: "Assignment Workspace",
-  difficulty: "Medium" as const,
-  topic: "General",
-  acceptance: 100,
-  points: 10,
-  status: "Attempted" as const,
-};
 
 interface AssignmentsPageProps {
   userType: Extract<UserType, "student" | "faculty" | "admin">;
@@ -489,7 +480,7 @@ export function AssignmentsPage({ userType }: AssignmentsPageProps) {
   const [showModal, setShowModal] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [submittingId, setSubmittingId] = useState<string | null>(null);
-  const [activeCodingAssignment, setActiveCodingAssignment] = useState<string | null>(null);
+  const [activeCodingAssignment, setActiveCodingAssignment] = useState<ApiAssignment | null>(null);
 
   const fetchAssignments = async () => {
     setLoading(true);
@@ -651,7 +642,7 @@ export function AssignmentsPage({ userType }: AssignmentsPageProps) {
                         <Button size="sm" variant="outline" onClick={() => setSubmittingId(a.id)}>
                           <Upload className="w-4 h-4 mr-1" /> Upload
                         </Button>
-                        <Button size="sm" onClick={() => setActiveCodingAssignment(a.id)}>Open</Button>
+                        <Button size="sm" onClick={() => setActiveCodingAssignment(a)}>Open</Button>
                       </>
                     ) : (
                       <>
@@ -670,7 +661,7 @@ export function AssignmentsPage({ userType }: AssignmentsPageProps) {
                       <span>Submissions: {a.assignment_submissions?.[0]?.count ?? 0}</span>
                     </div>
                     <div className="h-1.5 bg-muted rounded-full overflow-hidden w-full max-w-xs">
-                      <div className="h-full rounded-full bg-primary" style={{ width: "30%" }} />
+                      <div className="h-full rounded-full bg-primary" />
                     </div>
                   </div>
                 )}
@@ -682,7 +673,15 @@ export function AssignmentsPage({ userType }: AssignmentsPageProps) {
 
       {activeCodingAssignment && (
         <CodingWorkspace
-          problem={FALLBACK_CODING_PROBLEM}
+          problem={{
+            id: activeCodingAssignment.id,
+            title: activeCodingAssignment.title,
+            difficulty: "Medium",
+            topic: "General",
+            acceptance: 0,
+            points: activeCodingAssignment.max_marks ?? 0,
+            status: "Attempted",
+          }}
           mode="assignment"
           onClose={() => setActiveCodingAssignment(null)}
           hideTopBarStats={true}

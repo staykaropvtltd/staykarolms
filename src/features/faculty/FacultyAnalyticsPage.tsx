@@ -39,14 +39,6 @@ export function FacultyAnalyticsPage() {
     enrolled: c.enrollments?.[0]?.count || 0,
   }));
 
-  const n = totalStudents;
-  const scoreDistData = [
-    { range: "< 60",   count: Math.max(0, Math.round(n * 0.05)) },
-    { range: "60–70",  count: Math.max(0, Math.round(n * 0.12)) },
-    { range: "70–80",  count: Math.max(0, Math.round(n * 0.30)) },
-    { range: "80–90",  count: Math.max(0, Math.round(n * 0.35)) },
-    { range: "90–100", count: Math.max(0, Math.round(n * 0.18)) },
-  ];
 
   const handleExport = () => {
     if (!stats) { toast.error("No data yet"); return; }
@@ -98,16 +90,11 @@ export function FacultyAnalyticsPage() {
         </div>
 
         <div className="bg-card border border-border rounded-xl p-6">
-          <h2 className="text-base font-semibold text-foreground mb-4">Estimated Score Distribution</h2>
-          <ResponsiveContainer width="100%" height={240}>
-            <BarChart data={scoreDistData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-              <XAxis dataKey="range" stroke="var(--muted-foreground)" fontSize={12} />
-              <YAxis stroke="var(--muted-foreground)" fontSize={12} allowDecimals={false} />
-              <Tooltip contentStyle={tooltipStyle} />
-              <Bar dataKey="count" fill="var(--gold)" radius={[6, 6, 0, 0]} name="Students" />
-            </BarChart>
-          </ResponsiveContainer>
+          <h2 className="text-base font-semibold text-foreground mb-4">Score Distribution</h2>
+          <div className="flex flex-col items-center justify-center h-[240px] text-muted-foreground">
+            <FileCheck className="w-8 h-8 opacity-30 mb-2" />
+            <p className="text-sm">No submission grade data available yet.</p>
+          </div>
         </div>
       </div>
 

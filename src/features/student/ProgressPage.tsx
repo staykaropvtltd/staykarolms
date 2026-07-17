@@ -3,8 +3,7 @@ import { PageHeader } from "@/shared/components/PageHeader";
 import { StatCard } from "@/shared/components/StatCard";
 import { Clock, Target, TrendingUp, Trophy, Flame, Zap, Loader2 } from "lucide-react";
 import {
-  LineChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis, CartesianGrid,
-  RadarChart, Radar, PolarGrid, PolarAngleAxis, BarChart, Bar, Legend,
+  RadarChart, Radar, PolarGrid, PolarAngleAxis, ResponsiveContainer, Tooltip,
 } from "recharts";
 import { getStudentAnalytics } from "@/shared/lib/api";
 
@@ -14,10 +13,9 @@ function StreakHeatmap({ enrolledCount, completedCount }: { enrolledCount: numbe
   const heatmapData = Array.from({ length: 35 }, (_, i) => {
     const date = new Date();
     date.setDate(date.getDate() - (34 - i));
-    const hasActivity = (enrolledCount > 0 || completedCount > 0) && (i % 3 === 0 || i % 5 === 0);
     return {
       date: date.toISOString().split("T")[0],
-      hours: hasActivity ? parseFloat((Math.random() * 2 + 1).toFixed(1)) : 0,
+      hours: 0,
     };
   });
 
@@ -91,36 +89,6 @@ export function ProgressPage() {
   const xpNextLevel = xpLevel * 2000;
   const xpPct = Math.round((xpCurrent / xpNextLevel) * 100);
 
-  // Dynamic weekly learning hours based on enrollment/tests
-  const weeklyHours = [
-    { w: "W1", hours: enrolledCount * 1.2 },
-    { w: "W2", hours: completedTests * 1.5 },
-    { w: "W3", hours: enrolledCount * 0.8 },
-    { w: "W4", hours: completedTests * 2.0 },
-    { w: "W5", hours: enrolledCount * 1.0 },
-    { w: "W6", hours: completedTests * 2.5 },
-  ];
-
-  // Dynamic XP earned per week
-  const xpHistory = [
-    { week: "W1", xp: enrolledCount * 100 },
-    { week: "W2", xp: completedTests * 200 },
-    { week: "W3", xp: enrolledCount * 150 },
-    { week: "W4", xp: completedTests * 250 },
-    { week: "W5", xp: enrolledCount * 120 },
-    { week: "W6", xp: completedTests * 300 },
-  ];
-
-  // Dynamic daily activity breakdown
-  const dailyActivity = [
-    { day: "Mon", hours: enrolledCount * 0.5, problems: completedTests * 1, videos: enrolledCount * 1 },
-    { day: "Tue", hours: completedTests * 1.0, problems: completedTests * 2, videos: 0 },
-    { day: "Wed", hours: enrolledCount * 0.8, problems: 0, videos: enrolledCount * 2 },
-    { day: "Thu", hours: completedTests * 1.5, problems: completedTests * 3, videos: 0 },
-    { day: "Fri", hours: enrolledCount * 0.6, problems: completedTests * 1, videos: enrolledCount * 1 },
-    { day: "Sat", hours: completedTests * 2.0, problems: completedTests * 4, videos: 0 },
-    { day: "Sun", hours: enrolledCount * 0.4, problems: 0, videos: enrolledCount * 1 },
-  ];
 
   // Dynamic skill scores mapped from enrolled courses progress/grades
   const skillScores = enrolledCourses.map((c: any) => ({
@@ -179,48 +147,29 @@ export function ProgressPage() {
           <StreakHeatmap enrolledCount={enrolledCount} completedCount={completedTests} />
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <div className="bg-card border border-border rounded-xl p-6">
+            <div className="bg-card border border-border rounded-xl p-6 flex flex-col">
               <h2 className="text-base font-semibold text-foreground mb-4">Weekly Learning Hours</h2>
-              <ResponsiveContainer width="100%" height={220}>
-                <LineChart data={weeklyHours}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-                  <XAxis dataKey="w" stroke="var(--muted-foreground)" fontSize={12} />
-                  <YAxis stroke="var(--muted-foreground)" fontSize={12} />
-                  <Tooltip contentStyle={tooltipStyle} />
-                  <Line type="monotone" dataKey="hours" stroke="var(--gold)" strokeWidth={2.5} dot={{ r: 4, fill: "var(--gold)" }} />
-                </LineChart>
-              </ResponsiveContainer>
+              <div className="flex-1 flex flex-col items-center justify-center py-10 text-muted-foreground">
+                <Clock className="w-8 h-8 opacity-30 mb-2" />
+                <p className="text-sm">No activity data tracked yet.</p>
+              </div>
             </div>
 
-            <div className="bg-card border border-border rounded-xl p-6">
+            <div className="bg-card border border-border rounded-xl p-6 flex flex-col">
               <h2 className="text-base font-semibold text-foreground mb-4">XP Earned Per Week</h2>
-              <ResponsiveContainer width="100%" height={220}>
-                <BarChart data={xpHistory}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-                  <XAxis dataKey="week" stroke="var(--muted-foreground)" fontSize={12} />
-                  <YAxis stroke="var(--muted-foreground)" fontSize={12} />
-                  <Tooltip contentStyle={tooltipStyle} />
-                  <Bar dataKey="xp" fill="var(--gold)" radius={[6, 6, 0, 0]} name="XP" />
-                </BarChart>
-              </ResponsiveContainer>
+              <div className="flex-1 flex flex-col items-center justify-center py-10 text-muted-foreground">
+                <Zap className="w-8 h-8 opacity-30 mb-2" />
+                <p className="text-sm">No XP history tracked yet.</p>
+              </div>
             </div>
           </div>
 
-          {/* Daily activity */}
-          <div className="bg-card border border-border rounded-xl p-6">
+          <div className="bg-card border border-border rounded-xl p-6 flex flex-col">
             <h2 className="text-base font-semibold text-foreground mb-4">Daily Activity Breakdown</h2>
-            <ResponsiveContainer width="100%" height={200}>
-              <BarChart data={dailyActivity}>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-                <XAxis dataKey="day" stroke="var(--muted-foreground)" fontSize={12} />
-                <YAxis stroke="var(--muted-foreground)" fontSize={12} />
-                <Tooltip contentStyle={tooltipStyle} />
-                <Legend />
-                <Bar dataKey="hours" fill="var(--gold)" radius={[4, 4, 0, 0]} name="Hours" />
-                <Bar dataKey="problems" fill="var(--gold-muted)" radius={[4, 4, 0, 0]} name="Problems" />
-                <Bar dataKey="videos" fill="var(--muted-foreground)" radius={[4, 4, 0, 0]} name="Videos" />
-              </BarChart>
-            </ResponsiveContainer>
+            <div className="flex flex-col items-center justify-center py-10 text-muted-foreground">
+              <TrendingUp className="w-8 h-8 opacity-30 mb-2" />
+              <p className="text-sm">Daily activity tracking is not yet available.</p>
+            </div>
           </div>
         </div>
       )}

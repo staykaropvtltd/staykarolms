@@ -131,31 +131,12 @@ export function CodingWorkspace({
             <h2 className="text-2xl font-bold text-foreground mb-3">{problem.title}</h2>
             <div className="flex items-center gap-3">
               <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${DIFF_COLORS[problem.difficulty]}`}>{problem.difficulty}</span>
-              <span className="text-xs text-muted-foreground">Topics: Array, Hash Table</span>
+              {problem.topic && <span className="text-xs text-muted-foreground">Topic: {problem.topic}</span>}
             </div>
           </div>
-          
-          <div className="text-sm text-foreground leading-relaxed space-y-4">
-            <p>Write a function to solve the <strong>{problem.title}</strong> problem.</p>
-            <p>You may assume that each input would have <strong>exactly one solution</strong>, and you may not use the <em>same</em> element twice.</p>
-          </div>
-          
-          <div className="space-y-4">
-            <div>
-              <p className="font-semibold text-sm mb-2 text-foreground">Example 1:</p>
-              <div className="bg-muted/40 p-3.5 rounded-lg text-sm font-mono border border-border">
-                <span className="text-muted-foreground select-none">Input:</span> nums = [2,7,11,15], target = 9<br/>
-                <span className="text-muted-foreground select-none">Output:</span> [0,1]
-              </div>
-            </div>
-          </div>
-          
-          <div>
-            <p className="font-semibold text-sm mb-2 text-foreground">Constraints:</p>
-            <ul className="list-disc list-inside text-sm text-muted-foreground space-y-1.5 ml-1">
-              <li><code className="bg-muted px-1.5 py-0.5 rounded text-[13px]">2 &lt;= nums.length &lt;= 10^4</code></li>
-              <li><strong>Only one valid answer exists.</strong></li>
-            </ul>
+
+          <div className="text-sm text-muted-foreground italic">
+            No description provided for this problem.
           </div>
         </div>
       )
@@ -165,18 +146,9 @@ export function CodingWorkspace({
         id: "submissions",
         label: "Submissions",
         content: (
-          <div className="space-y-3">
-            <div className="p-4 rounded-xl border border-border bg-muted/20 flex flex-col gap-2">
-              <div className="flex justify-between items-start">
-                <span className="font-semibold text-sm text-green-500">Accepted</span>
-                <span className="text-xs text-muted-foreground">10 minutes ago</span>
-              </div>
-              <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                <span className="px-2 py-1 bg-background rounded-md border border-border">Python</span>
-                <span>Runtime: 42ms</span>
-                <span>Memory: 14.2MB</span>
-              </div>
-            </div>
+          <div className="h-full flex flex-col items-center justify-center text-center text-muted-foreground space-y-3 py-10">
+            <p className="text-sm">No submissions yet.</p>
+            <p className="text-xs max-w-[250px]">Submit your code to see your submission history here.</p>
           </div>
         )
       },
@@ -302,7 +274,7 @@ export function CodingWorkspace({
           memory:  lastResult?.memory ? `${lastResult.memory} KB` : "—",
           passedCases,
           totalCases,
-          beats: finalStatus === 3 ? Math.floor(Math.random() * 30 + 65) : 0,
+          beats: 0,
         });
       }
     } catch (err: any) {
@@ -335,12 +307,7 @@ export function CodingWorkspace({
         {headerCenter && <div className="flex-1 flex justify-center">{headerCenter}</div>}
         
         <div className="flex items-center justify-end flex-1 gap-2">
-          {headerRight || (mode === "practice" && (
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-[var(--gold-muted)] border border-[var(--gold)]/30 hidden sm:flex">
-              <span className="text-sm">🔥</span>
-              <span className="text-xs font-bold text-[var(--gold)]">12 Day Streak</span>
-            </div>
-          ))}
+          {headerRight || null}
         </div>
       </div>
 
@@ -442,7 +409,7 @@ export function CodingWorkspace({
                       <input
                         type="text"
                         data-judge0-stdin
-                        defaultValue="[2,7,11,15]\n9"
+                        defaultValue={(problem as any).sampleInput ?? ""}
                         className="w-full bg-muted/50 border border-border rounded-md px-3 py-1.5 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-[var(--gold)]"
                       />
                     </div>
@@ -552,11 +519,6 @@ export function CodingWorkspace({
                   }`}>
                     {submissionResult.status}
                   </h2>
-                  {submissionResult.status === "Accepted" && mode === "practice" && (
-                    <p className="text-sm font-medium text-foreground mt-1">
-                      Beats <span className="text-green-500">{submissionResult.beats}%</span> of {language} submissions
-                    </p>
-                  )}
                 </div>
 
                 <div className="grid grid-cols-2 gap-3 w-full mt-2">

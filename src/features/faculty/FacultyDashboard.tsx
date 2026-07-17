@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { BookOpen, Users, FileCheck, TrendingUp, AlertTriangle, CheckCircle, Clock, Video, Loader2 } from "lucide-react";
 import { StatCard } from "@/shared/components/StatCard";
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line } from "recharts";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { useNavigate } from "react-router";
 import { getFacultyAnalytics, getLiveClasses, getUsers } from "@/shared/lib/api";
 import { useAuth } from "@/shared/context/AuthContext";
@@ -76,14 +76,7 @@ export function FacultyDashboard() {
   const atRiskStudents = studentRows.filter(s => s.status === "At risk");
   const upcoming = liveClasses.filter(c => c.status === "scheduled" || c.status === "live");
 
-  // Score distribution — placeholder bars showing 0-100 bands (no real submission data per-student here)
   const avgGrade = stats?.avgSubmissionGrade || 0;
-  const scoreDistData = [
-    { range: "< 50",   count: Math.max(0, Math.round(students.length * 0.05)) },
-    { range: "50–70",  count: Math.max(0, Math.round(students.length * 0.15)) },
-    { range: "70–85",  count: Math.max(0, Math.round(students.length * 0.45)) },
-    { range: "85–100", count: Math.max(0, Math.round(students.length * 0.35)) },
-  ];
 
   return (
     <div className="p-8 space-y-6">
@@ -126,18 +119,13 @@ export function FacultyDashboard() {
         {/* Score Distribution */}
         <div className="bg-card border border-border rounded-2xl p-6">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-foreground">Estimated Score Distribution</h2>
+            <h2 className="text-lg font-semibold text-foreground">Score Distribution</h2>
             <span className="text-xs text-muted-foreground bg-muted px-2 py-1 rounded-lg">All courses</span>
           </div>
-          <ResponsiveContainer width="100%" height={220}>
-            <BarChart data={scoreDistData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-              <XAxis dataKey="range" stroke="var(--muted-foreground)" fontSize={12} />
-              <YAxis stroke="var(--muted-foreground)" fontSize={12} allowDecimals={false} />
-              <Tooltip contentStyle={tooltipStyle} />
-              <Bar dataKey="count" fill="var(--gold)" radius={[6, 6, 0, 0]} name="Students" />
-            </BarChart>
-          </ResponsiveContainer>
+          <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+            <TrendingUp className="w-8 h-8 opacity-30 mb-2" />
+            <p className="text-sm">No submission data available yet.</p>
+          </div>
         </div>
       </div>
 

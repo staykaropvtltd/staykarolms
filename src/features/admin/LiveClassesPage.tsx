@@ -344,8 +344,6 @@ export function LiveClassesPage() {
   const filtered = classes.filter(c => c.status === tab || (tab === "upcoming" && c.status === "live"));
   const upcomingCount  = classes.filter(c => c.status === "upcoming" || c.status === "live").length;
   const completedCount = classes.filter(c => c.status === "completed").length;
-  const avgAttendance = 85; // Hardcoded avg for demo since attendance stats require another API call
-
   return (
     <div className="p-8">
       {showModal && <ScheduleModal onClose={() => setShowModal(false)} onScheduled={() => { setShowModal(false); loadClasses(); }} />}
@@ -360,10 +358,9 @@ export function LiveClassesPage() {
         }
       />
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
         <StatCard title="Upcoming sessions" value={loading ? "—" : String(upcomingCount)} icon={Video} trend={{ value: "Next 7 days", isPositive: true }} />
         <StatCard title="Sessions completed" value={loading ? "—" : String(completedCount)} icon={CheckCircle} trend={{ value: "This month", isPositive: true }} />
-        <StatCard title="Avg attendance" value={`${avgAttendance}%`} icon={Users} trend={{ value: "Platform average", isPositive: true }} />
       </div>
 
       <div className="flex gap-1 mb-4 bg-muted/40 p-1 rounded-lg w-fit">

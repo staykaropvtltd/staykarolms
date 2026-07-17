@@ -31,20 +31,7 @@ interface InterviewQuestion {
 
 const tooltipStyle = { backgroundColor: "var(--card)", border: "1px solid var(--border)", borderRadius: "8px", fontSize: "12px" };
 
-const rubricBreakdown = [
-  { category: "Problem Solving", score: 86 },
-  { category: "Communication", score: 72 },
-  { category: "Code Quality", score: 88 },
-  { category: "Edge Cases", score: 74 },
-];
-
-const FALLBACK_QUESTIONS: InterviewQuestion[] = [
-  { id: 1, question: "Explain the difference between BFS and DFS.", category: "DSA", difficulty: "Medium", track: "backend" },
-  { id: 2, question: "What is the time complexity of quicksort?", category: "Algorithms", difficulty: "Easy", track: "backend" },
-  { id: 3, question: "Design a URL shortener system.", category: "System Design", difficulty: "Hard", track: "system" },
-  { id: 4, question: "Explain React's reconciliation algorithm.", category: "Frontend", difficulty: "Medium", track: "frontend" },
-  { id: 5, question: "What are SOLID principles?", category: "OOP", difficulty: "Medium", track: "backend" },
-];
+const rubricCategories = ["Problem Solving", "Communication", "Code Quality", "Edge Cases"];
 
 const DIFF_COLORS: Record<string, string> = {
   Easy: "bg-[var(--gold-muted)] text-[var(--gold)]",
@@ -396,13 +383,9 @@ export function AiInterviewerPage({ userType }: AiInterviewerPageProps) {
       const valid = (Array.isArray(data) ? data : []).filter(
         (q): q is InterviewQuestion => q != null && typeof q.question === "string"
       );
-      if (valid.length > 0) {
-        setQuestions(valid);
-      } else {
-        setQuestions(isStudent ? FALLBACK_QUESTIONS : []);
-      }
+      setQuestions(valid);
     } catch {
-      setQuestions(isStudent ? FALLBACK_QUESTIONS : []);
+      setQuestions([]);
     }
     setQuestionsLoading(false);
   };
@@ -437,7 +420,8 @@ export function AiInterviewerPage({ userType }: AiInterviewerPageProps) {
   }, [sessionActive, sessionEnded]);
 
   const startSession = () => {
-    const qs = (questions.length > 0 ? questions : FALLBACK_QUESTIONS).filter(Boolean);
+    if (questions.length === 0) return;
+    const qs = questions.filter(Boolean);
     const secs = DURATION_OPTS[selectedDuration];
     setSessionQuestions(qs);
     setTimeLeft(secs);
@@ -451,7 +435,7 @@ export function AiInterviewerPage({ userType }: AiInterviewerPageProps) {
 
   const endSession = async () => {
     if (timerRef.current) clearInterval(timerRef.current);
-    const qs = sessionQuestions.length > 0 ? sessionQuestions : FALLBACK_QUESTIONS;
+    const qs = sessionQuestions;
     const answeredCount = submittedQs.filter(Boolean).length;
     const score = Math.round((answeredCount / qs.length) * 100);
     setSessionScore(score);
@@ -464,7 +448,7 @@ export function AiInterviewerPage({ userType }: AiInterviewerPageProps) {
   };
 
   const handleSubmitAnswer = () => {
-    const qs = sessionQuestions.length > 0 ? sessionQuestions : FALLBACK_QUESTIONS;
+    const qs = sessionQuestions;
     const updated = [...submittedQs];
     updated[currentQ] = true;
     setSubmittedQs(updated);
@@ -473,7 +457,7 @@ export function AiInterviewerPage({ userType }: AiInterviewerPageProps) {
   };
 
   const handleSkip = () => {
-    const qs = sessionQuestions.length > 0 ? sessionQuestions : FALLBACK_QUESTIONS;
+    const qs = sessionQuestions;
     if (currentQ < qs.length - 1) setCurrentQ(p => p + 1);
   };
 
@@ -489,7 +473,7 @@ export function AiInterviewerPage({ userType }: AiInterviewerPageProps) {
 
   const formatTime = (s: number) => `${Math.floor(s / 60).toString().padStart(2, "0")}:${(s % 60).toString().padStart(2, "0")}`;
 
-  const activeQuestions = questions.length > 0 ? questions : FALLBACK_QUESTIONS;
+  const activeQuestions = questions;
   const isTimerLow = timeLeft < 5 * 60;
   const timeTaken = DURATION_OPTS[selectedDuration] - timeLeft;
   const answeredCount = submittedQs.filter(Boolean).length;
@@ -550,23 +534,6 @@ export function AiInterviewerPage({ userType }: AiInterviewerPageProps) {
                   <div className="bg-card border border-border rounded-xl p-4 text-center">
                     <div className="text-3xl font-bold">{formatTime(timeTaken)}</div>
                     <div className="text-xs text-muted-foreground mt-1">Time Taken</div>
-                  </div>
-                </div>
-                <div className="bg-card border border-border rounded-xl p-6">
-                  <h3 className="font-semibold mb-4">Score Rubric Breakdown</h3>
-                  <div className="space-y-3">
-                    {rubricBreakdown.map(r => (
-                      <div key={r.category}>
-                        <div className="flex justify-between text-sm mb-1">
-                          <span className="text-muted-foreground">{r.category}</span>
-                          <span className="font-semibold tabular-nums">{r.score}%</span>
-                        </div>
-                        <div className="h-2 bg-muted rounded-full overflow-hidden">
-                          <motion.div initial={{ width: 0 }} animate={{ width: `${r.score}%` }} transition={{ duration: 0.8, delay: 0.1 }}
-                            className={`h-full rounded-full ${r.score >= 80 ? "bg-[var(--gold)]" : r.score >= 65 ? "bg-amber-500" : "bg-red-500"}`} />
-                        </div>
-                      </div>
-                    ))}
                   </div>
                 </div>
                 <div className="bg-card border border-border rounded-xl overflow-hidden">
@@ -829,26 +796,27 @@ export function AiInterviewerPage({ userType }: AiInterviewerPageProps) {
                 <Button className="w-full gap-2 mt-2" size="lg" disabled>
                   <Loader2 className="size-4 animate-spin" /> Loading questions…
                 </Button>
+              ) : activeQuestions.length === 0 ? (
+                <Button className="w-full gap-2 mt-2" size="lg" disabled>
+                  <Mic className="size-4" /> No questions available
+                </Button>
               ) : (
                 <Button className="w-full gap-2 mt-2" size="lg" onClick={startSession}>
                   <Mic className="size-4" /> Start Session ({activeQuestions.length} questions)
                 </Button>
               )}
-              <p className="text-xs text-muted-foreground">Demo: no audio is recorded. Wire your provider keys to go live.</p>
+              {!questionsLoading && activeQuestions.length === 0 && (
+                <p className="text-xs text-muted-foreground text-center">Your admin hasn't added any interview questions yet. Check back later.</p>
+              )}
             </div>
 
             <div className="rounded-xl border border-border bg-card p-6 flex flex-col gap-4">
-              <h2 className="font-semibold text-foreground">Score Rubric</h2>
-              <div className="space-y-3">
-                {rubricBreakdown.map(r => (
-                  <div key={r.category}>
-                    <div className="flex justify-between text-sm mb-1">
-                      <span className="text-muted-foreground">{r.category}</span>
-                      <span className="font-semibold text-foreground tabular-nums">{r.score}%</span>
-                    </div>
-                    <div className="h-2 bg-muted rounded-full overflow-hidden">
-                      <div className={`h-full rounded-full ${r.score >= 80 ? "bg-primary" : r.score >= 65 ? "bg-primary/60" : "bg-red-500"}`} style={{ width: `${r.score}%` }} />
-                    </div>
+              <h2 className="font-semibold text-foreground">Evaluation Criteria</h2>
+              <div className="space-y-2">
+                {rubricCategories.map(cat => (
+                  <div key={cat} className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <div className="w-1.5 h-1.5 rounded-full bg-[var(--gold)] shrink-0" />
+                    {cat}
                   </div>
                 ))}
               </div>
