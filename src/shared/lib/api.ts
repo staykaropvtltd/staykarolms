@@ -590,6 +590,9 @@ export const getBatches = () => apiFetch("/api/batches");
 
 export const getBatch = (id: string) => apiFetch(`/api/batches/${id}`);
 
+export const getStudentPermissions = () =>
+  apiFetch<{ allowed_paths: string[] | null }>("/api/batches/student-permissions");
+
 export const createBatch = (payload: {
   name: string;
   description?: string;

@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import type { UserType } from "../userTypes";
 import { useAuth } from "../context/AuthContext";
+import { useBatchPermissions } from "../hooks/useBatchPermissions";
 import { motion } from "motion/react";
 
 interface SidebarProps {
@@ -102,7 +103,15 @@ const SUBTITLES: Record<UserType, string> = {
 export function Sidebar({ userType, onClose }: SidebarProps) {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
-  const menuItems = MENUS[userType];
+  const batchPermissions = useBatchPermissions();
+
+  // For students: filter sidebar items to only those the batch grants access to.
+  // null permissions = no restrictions, show all items.
+  const menuItems =
+    userType === "student" && batchPermissions !== null
+      ? MENUS[userType].filter(item => batchPermissions.has(item.path))
+      : MENUS[userType];
+
   const base = `/${userType}`;
 
   const handleNavigate = () => {

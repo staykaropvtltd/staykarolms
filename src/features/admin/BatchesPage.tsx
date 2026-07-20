@@ -2,18 +2,37 @@ import { useState, useEffect, useRef } from "react";
 import {
   Layers, Plus, X, Calendar, Users, Loader2, AlertCircle,
   UserPlus, Upload, Search, FileText, ChevronDown, UserMinus,
-  BookOpen, Trash2,
+  BookOpen, Trash2, ShieldCheck,
 } from "lucide-react";
 import { PageHeader } from "@/shared/components/PageHeader";
 import { StatCard } from "@/shared/components/StatCard";
 import { Button } from "@/shared/components/ui/button";
+import { Switch } from "@/shared/components/ui/switch";
 import {
-  getBatches, createBatch, getBatch,
+  getBatches, createBatch, getBatch, updateBatch,
   addStudentToBatch, removeStudentFromBatch, bulkAddStudentsToBatch,
   getBatchCourses, assignCourseToBatch, removeCourseFromBatch,
   getUsers, getCourses,
 } from "@/shared/lib/api";
 import { toast } from "sonner";
+
+// All student sidebar items — mirrors the studentMenu in Sidebar.tsx
+const STUDENT_MENU_ITEMS = [
+  { path: "dashboard",      label: "Dashboard" },
+  { path: "courses",        label: "Explore Courses" },
+  { path: "my-courses",     label: "My Learning" },
+  { path: "progress",       label: "My Progress" },
+  { path: "assignments",    label: "Assignments" },
+  { path: "code-editor",    label: "Coding Practice" },
+  { path: "coding-test",    label: "Coding Test" },
+  { path: "aptitude-test",  label: "Aptitude Test" },
+  { path: "ai-interviewer", label: "AI Interview Prep" },
+  { path: "certificates",   label: "Certificates" },
+  { path: "calendar",       label: "Calendar" },
+  { path: "messages",       label: "Messages" },
+  { path: "notifications",  label: "Notifications" },
+  { path: "settings",       label: "Settings" },
+] as const;
 
 interface ApiBatch {
   id: string;
@@ -24,6 +43,7 @@ interface ApiBatch {
   end_date?: string;
   status?: string;
   profiles?: { name: string; email: string };
+  student_permissions?: string[] | null;
 }
 
 interface BatchStudent {
@@ -450,16 +470,34 @@ function BatchDetailModal({
   const [loading, setLoading] = useState(true);
   const [removingId, setRemovingId] = useState<string | null>(null);
   const [showCSV, setShowCSV] = useState(false);
-  const [activeTab, setActiveTab] = useState<"students" | "courses">("students");
+  const [activeTab, setActiveTab] = useState<"students" | "courses" | "access">("students");
   const [batchCourses, setBatchCourses] = useState<any[]>([]);
   const [coursesLoading, setCoursesLoading] = useState(false);
   const [removingCourseId, setRemovingCourseId] = useState<string | null>(null);
+
+  // Access control state: null = full access, Set = restricted to these paths
+  const [accessMode, setAccessMode] = useState<"all" | "custom">("all");
+  const [enabledPaths, setEnabledPaths] = useState<Set<string>>(
+    new Set(STUDENT_MENU_ITEMS.map(i => i.path))
+  );
+  const [savingAccess, setSavingAccess] = useState(false);
 
   const fetchBatch = async () => {
     setLoading(true);
     const { data, error } = await getBatch(batchId);
     if (error) { toast.error(error); }
-    else setBatch(data as BatchDetail);
+    else {
+      const b = data as BatchDetail;
+      setBatch(b);
+      // Sync access control state from the loaded batch
+      if (b.student_permissions === null || b.student_permissions === undefined) {
+        setAccessMode("all");
+        setEnabledPaths(new Set(STUDENT_MENU_ITEMS.map(i => i.path)));
+      } else {
+        setAccessMode("custom");
+        setEnabledPaths(new Set(b.student_permissions));
+      }
+    }
     setLoading(false);
   };
 
@@ -497,6 +535,25 @@ function BatchDetailModal({
     fetchCourses();
   };
 
+  const handleSaveAccess = async () => {
+    const permissions = accessMode === "all" ? null : [...enabledPaths];
+    setSavingAccess(true);
+    const { error } = await updateBatch(batchId, { student_permissions: permissions });
+    setSavingAccess(false);
+    if (error) { toast.error(error); return; }
+    toast.success("Student access updated");
+    setBatch(prev => prev ? { ...prev, student_permissions: permissions } : prev);
+  };
+
+  const togglePath = (path: string) => {
+    setEnabledPaths(prev => {
+      const next = new Set(prev);
+      if (next.has(path)) next.delete(path); else next.add(path);
+      return next;
+    });
+    setAccessMode("custom");
+  };
+
   return (
     <>
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
@@ -532,16 +589,24 @@ function BatchDetailModal({
           {/* Tabs */}
           <div className="flex items-center justify-between px-6 py-3 border-b border-border bg-muted/20 shrink-0">
             <div className="flex gap-1 bg-muted/40 p-1 rounded-lg">
-              {(["students", "courses"] as const).map(t => (
-                <button
-                  key={t}
-                  onClick={() => setActiveTab(t)}
-                  className={`px-3 py-1.5 rounded-md text-sm font-medium capitalize transition-colors flex items-center gap-1.5 ${activeTab === t ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
-                >
-                  {t === "students" ? <Users className="w-3.5 h-3.5" /> : <BookOpen className="w-3.5 h-3.5" />}
-                  {t === "students" ? `Students (${students.length})` : `Courses (${batchCourses.length})`}
-                </button>
-              ))}
+              <button
+                onClick={() => setActiveTab("students")}
+                className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center gap-1.5 ${activeTab === "students" ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+              >
+                <Users className="w-3.5 h-3.5" /> Students ({students.length})
+              </button>
+              <button
+                onClick={() => setActiveTab("courses")}
+                className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center gap-1.5 ${activeTab === "courses" ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+              >
+                <BookOpen className="w-3.5 h-3.5" /> Courses ({batchCourses.length})
+              </button>
+              <button
+                onClick={() => setActiveTab("access")}
+                className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center gap-1.5 ${activeTab === "access" ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+              >
+                <ShieldCheck className="w-3.5 h-3.5" /> Student Access
+              </button>
             </div>
 
             <div className="flex items-center gap-2">
@@ -655,6 +720,59 @@ function BatchDetailModal({
                   ))}
                 </div>
               )
+            )}
+
+            {/* Access tab */}
+            {activeTab === "access" && (
+              <div className="space-y-5">
+                <div className="rounded-xl border border-border bg-background p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-semibold text-foreground">Full access</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        Students in this batch can see all sidebar items
+                      </p>
+                    </div>
+                    <Switch
+                      checked={accessMode === "all"}
+                      onCheckedChange={checked => {
+                        setAccessMode(checked ? "all" : "custom");
+                        if (checked) setEnabledPaths(new Set(STUDENT_MENU_ITEMS.map(i => i.path)));
+                      }}
+                    />
+                  </div>
+                </div>
+
+                {accessMode === "custom" && (
+                  <div className="rounded-xl border border-border bg-background divide-y divide-border">
+                    {STUDENT_MENU_ITEMS.map(item => (
+                      <div key={item.path} className="flex items-center justify-between px-4 py-3">
+                        <span className="text-sm text-foreground">{item.label}</span>
+                        <Switch
+                          checked={enabledPaths.has(item.path)}
+                          onCheckedChange={() => togglePath(item.path)}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <div className="flex items-center justify-between">
+                  {accessMode === "custom" && (
+                    <p className="text-xs text-muted-foreground">
+                      {enabledPaths.size} of {STUDENT_MENU_ITEMS.length} items enabled
+                    </p>
+                  )}
+                  <Button
+                    className="ml-auto"
+                    onClick={handleSaveAccess}
+                    disabled={savingAccess}
+                  >
+                    {savingAccess && <Loader2 className="w-4 h-4 animate-spin mr-1.5" />}
+                    Save Access Settings
+                  </Button>
+                </div>
+              </div>
             )}
           </div>
         </div>

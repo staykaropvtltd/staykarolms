@@ -19,6 +19,40 @@ router.get("/", authenticate, async (req, res, next) => {
   }
 });
 
+// GET /api/batches/student-permissions — effective sidebar permissions for the logged-in student.
+// Returns allowed_paths: null when there are no restrictions (show everything),
+// or an array of path keys when the student's batch(es) restrict access.
+router.get("/student-permissions", authenticate, async (req, res, next) => {
+  if (req.user.role !== "student") {
+    return res.json({ data: { allowed_paths: null } });
+  }
+  try {
+    const { data, error } = await supabase
+      .from("batch_students")
+      .select("batches:batch_id(student_permissions)")
+      .eq("student_id", req.user.id);
+
+    if (error) return res.status(400).json({ error: error.message });
+    if (!data || data.length === 0) return res.json({ data: { allowed_paths: null } });
+
+    // If ANY batch has NULL permissions, the student is unrestricted.
+    const hasUnrestricted = data.some(row => row.batches?.student_permissions === null);
+    if (hasUnrestricted) return res.json({ data: { allowed_paths: null } });
+
+    // Union of all batch permission arrays
+    const union = new Set();
+    for (const row of data) {
+      for (const path of (row.batches?.student_permissions || [])) {
+        union.add(path);
+      }
+    }
+
+    return res.json({ data: { allowed_paths: union.size > 0 ? [...union] : null } });
+  } catch (err) {
+    return next(err);
+  }
+});
+
 // GET /api/batches/:id — single batch with students
 router.get("/:id", authenticate, async (req, res, next) => {
   try {
