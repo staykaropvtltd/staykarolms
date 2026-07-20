@@ -18,10 +18,6 @@ const app = express();
 // Reject all requests if required env vars are missing
 app.use(startupGuard);
 
-// Shared Redis client — lib/redis.js handles lazy-init and error recovery.
-// Falls back gracefully to null when REDIS_URL is not set.
-const redisClient = redis.getClient();
-
 // Build rate-limiter options, shared via Redis when available
 function makeLimiter({ windowMs, max, message }) {
   const opts = {
@@ -34,10 +30,16 @@ function makeLimiter({ windowMs, max, message }) {
     // taking down every route — each worker just enforces limits independently.
     passOnStoreError: true,
   };
-  const rc = redis.getClient();
-  if (rc) {
+  if (redis.getClient()) {
     opts.store = new RedisStore({
-      sendCommand: (...args) => rc.call(...args),
+      // Re-resolve the client on every command so the circuit breaker in
+      // lib/redis.js can disable Redis after repeated failures without the
+      // rate limiter keeping a stale reference alive.
+      sendCommand: (...args) => {
+        const client = redis.getClient();
+        if (!client) throw new Error("Redis unavailable");
+        return client.call(...args);
+      },
     });
   }
   return rateLimit(opts);

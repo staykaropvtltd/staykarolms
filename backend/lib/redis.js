@@ -23,8 +23,8 @@ function getClient() {
       maxRetriesPerRequest:  1,
       enableReadyCheck:      false,
       lazyConnect:           true,
-      connectTimeout:        2000,  // 2 s — don't stall request pipeline
-      commandTimeout:        500,   // 500 ms per command
+      connectTimeout:        3000,  // 3 s
+      commandTimeout:        2000,  // 2 s — Upstash cold-start can reach ~1 s
     });
   } catch (err) {
     _failed = true;
