@@ -4,7 +4,6 @@ const cors = require("cors");
 const helmet = require("helmet");
 const compression = require("compression");
 const rateLimit = require("express-rate-limit");
-const { RedisStore } = require("rate-limit-redis");
 const supabase = require("./lib/supabase");
 const redis = require("./lib/redis");
 const logger = require("./lib/logger");
@@ -18,31 +17,17 @@ const app = express();
 // Reject all requests if required env vars are missing
 app.use(startupGuard);
 
-// Build rate-limiter options, shared via Redis when available
+// In-memory rate limiting only — Redis is used for analytics caching, not
+// for rate limit state. On Vercel serverless each invocation is isolated so
+// Redis-backed rate limiting would add latency without meaningful benefit.
 function makeLimiter({ windowMs, max, message }) {
-  const opts = {
+  return rateLimit({
     windowMs,
     max,
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: message },
-    // If Redis is down/unreachable, fail open (allow the request) instead of
-    // taking down every route — each worker just enforces limits independently.
-    passOnStoreError: true,
-  };
-  if (redis.getClient()) {
-    opts.store = new RedisStore({
-      // Re-resolve the client on every command so the circuit breaker in
-      // lib/redis.js can disable Redis after repeated failures without the
-      // rate limiter keeping a stale reference alive.
-      sendCommand: (...args) => {
-        const client = redis.getClient();
-        if (!client) throw new Error("Redis unavailable");
-        return client.call(...args);
-      },
-    });
-  }
-  return rateLimit(opts);
+  });
 }
 
 // ── CORS — must come first so headers are set even on errors ──
