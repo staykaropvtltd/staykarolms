@@ -53,7 +53,29 @@ router.get("/:id", authenticate, requireRole("admin", "faculty", "super-admin"),
     }
 
     const { data, error } = await query.single();
-    if (error || !data) return res.status(404).json({ error: "User not found" });
+    if (error || !data) {
+      // Profile row missing — fall back to Supabase auth admin to surface
+      // whatever we know (e.g. nominal-roll students whose profile upsert failed).
+      try {
+        const { data: { user: authUser } } = await supabase.auth.admin.getUserById(req.params.id);
+        if (!authUser) return res.status(404).json({ error: "User not found" });
+        const meta = authUser.user_metadata || {};
+        return res.json({
+          data: {
+            id: authUser.id,
+            email: authUser.email,
+            name: meta.name || authUser.email?.split("@")[0] || "User",
+            role: meta.role || "student",
+            institution_id: meta.institution_id || null,
+            avatar_url: null,
+            created_at: authUser.created_at,
+            batch_students: [],
+          },
+        });
+      } catch {
+        return res.status(404).json({ error: "User not found" });
+      }
+    }
     return res.json({ data });
   } catch (err) {
     return next(err);

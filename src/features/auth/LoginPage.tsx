@@ -7,6 +7,16 @@ import { useTheme } from "next-themes";
 
 type LocationState = { from?: { pathname: string } };
 
+function friendlyLoginError(msg: string): string {
+  if (!msg) return "Something went wrong. Please try again.";
+  if (/invalid login credentials/i.test(msg)) return "Incorrect email or password. Please try again.";
+  if (/email not confirmed/i.test(msg)) return "Please verify your email address before signing in.";
+  if (/too many requests/i.test(msg)) return "Too many login attempts. Please wait a moment and try again.";
+  if (/user not found/i.test(msg)) return "No account found with this email address.";
+  if (/network/i.test(msg) || /fetch/i.test(msg)) return "Connection error. Please check your internet and try again.";
+  return msg;
+}
+
 // ── Theme-specific color tokens ────────────────────────────────────────────────
 const LIGHT = {
   leftBg:       "linear-gradient(160deg, #FFFBEB 0%, #FFF3CD 50%, #FFE9A0 100%)",
@@ -103,7 +113,7 @@ export function LoginPage() {
       const destination = state?.from?.pathname ?? (profile ? `/${profile.role}/dashboard` : "/");
       navigate(destination, { replace: true });
     } catch (err: any) {
-      setErrorMsg(err.message || "Invalid email or password.");
+      setErrorMsg(friendlyLoginError(err.message));
     } finally {
       setIsLoggingIn(false);
     }

@@ -75,6 +75,8 @@ async function authenticate(req, res, next) {
 
   // ── 3. Cold path: verify JWT ──────────────────────────────────
   let userId;
+  let capturedAuthUser = null; // kept for profile auto-create (ES256 path already has it)
+
   if (process.env.SUPABASE_JWT_SECRET) {
     // Local HS256 verification — zero network calls
     try {
@@ -91,6 +93,7 @@ async function authenticate(req, res, next) {
         return res.status(401).json({ error: "Invalid or expired token" });
       }
       userId = user.id;
+      capturedAuthUser = user; // reuse below if profile row is missing
     } catch (err) {
       console.error("[auth] remote getUser error:", err.message);
       return res.status(500).json({ error: "Authentication failed" });
@@ -101,14 +104,46 @@ async function authenticate(req, res, next) {
 
   // ── 4. Cold path: fetch profile from DB ───────────────────────
   try {
-    const { data: profile, error } = await supabase
+    const { data: profile, error: profileError } = await supabase
       .from("profiles")
       .select("id, name, email, role, institution_id")
       .eq("id", userId)
       .single();
 
-    if (error || !profile) {
-      if (error) console.error("[auth] profile fetch error:", error.message);
+    let resolvedProfile = profile;
+
+    if (profileError || !profile) {
+      // JWT is valid but profile row is missing (e.g. bulk-import auth user whose
+      // profile upsert silently failed). Lazy-create from Supabase auth metadata
+      // so the user can log in without an admin manually fixing the DB.
+      try {
+        const authUser =
+          capturedAuthUser ||
+          (await supabase.auth.admin.getUserById(userId)).data?.user;
+
+        if (authUser) {
+          const meta = authUser.user_metadata || {};
+          const newProfile = {
+            id: userId,
+            email: authUser.email,
+            name: meta.name || authUser.email?.split("@")[0] || "User",
+            role: meta.role || "student",
+            institution_id: meta.institution_id || null,
+          };
+          const { data: upserted } = await supabase
+            .from("profiles")
+            .upsert(newProfile, { onConflict: "id" })
+            .select("id, name, email, role, institution_id")
+            .single();
+          resolvedProfile = upserted || newProfile;
+          console.log(`[auth] auto-created profile for ${userId} (role: ${resolvedProfile.role})`);
+        }
+      } catch (upsertErr) {
+        console.error("[auth] profile auto-create error:", upsertErr.message);
+      }
+    }
+
+    if (!resolvedProfile) {
       return res.status(401).json({ error: "User profile not found" });
     }
 
@@ -119,8 +154,8 @@ async function authenticate(req, res, next) {
       ? Math.max(1, Math.min(REDIS_TTL_S, exp - Math.floor(now / 1000) - 10))
       : REDIS_TTL_S;
 
-    await redis.set(cacheKey, JSON.stringify(profile), ttl);
-    _localCache.set(cacheKey, { profile, expiresAt: now + LOCAL_TTL_MS });
+    await redis.set(cacheKey, JSON.stringify(resolvedProfile), ttl);
+    _localCache.set(cacheKey, { profile: resolvedProfile, expiresAt: now + LOCAL_TTL_MS });
 
     // Prune stale in-process entries
     if (_localCache.size > 500) {
@@ -129,7 +164,7 @@ async function authenticate(req, res, next) {
       }
     }
 
-    req.user = profile;
+    req.user = resolvedProfile;
     return next();
   } catch (err) {
     console.error("[auth] middleware error:", err.message);
