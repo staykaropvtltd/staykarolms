@@ -10,9 +10,9 @@ import { Button } from "@/shared/components/ui/button";
 import { Switch } from "@/shared/components/ui/switch";
 import {
   getBatches, createBatch, getBatch, updateBatch,
-  addStudentToBatch, removeStudentFromBatch, bulkAddStudentsToBatch,
+  addStudentToBatch, removeStudentFromBatch, removeAllStudentsFromBatch, bulkAddStudentsToBatch,
   getBatchCourses, assignCourseToBatch, removeCourseFromBatch,
-  getUsers, getCourses,
+  getUsers, getCourses, deleteUser,
 } from "@/shared/lib/api";
 import { toast } from "sonner";
 
@@ -482,6 +482,12 @@ function BatchDetailModal({
   );
   const [savingAccess, setSavingAccess] = useState(false);
 
+  // Remove-all and delete-user confirmation state
+  const [showRemoveAll, setShowRemoveAll] = useState(false);
+  const [removingAll, setRemovingAll] = useState(false);
+  const [confirmDeleteUser, setConfirmDeleteUser] = useState<BatchStudent | null>(null);
+  const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
+
   const fetchBatch = async () => {
     setLoading(true);
     const { data, error } = await getBatch(batchId);
@@ -523,6 +529,26 @@ function BatchDetailModal({
     setRemovingId(null);
     if (error) { toast.error(error); return; }
     toast.success(`${student.name} removed from batch`);
+    fetchBatch();
+  };
+
+  const handleRemoveAll = async () => {
+    setRemovingAll(true);
+    const { error } = await removeAllStudentsFromBatch(batchId);
+    setRemovingAll(false);
+    if (error) { toast.error(error); return; }
+    toast.success("All students removed from batch");
+    setShowRemoveAll(false);
+    fetchBatch();
+  };
+
+  const handleDeleteUser = async (student: BatchStudent) => {
+    setDeletingUserId(student.id);
+    const { error } = await deleteUser(student.id);
+    setDeletingUserId(null);
+    if (error) { toast.error(error); return; }
+    toast.success(`${student.name}'s account deleted`);
+    setConfirmDeleteUser(null);
     fetchBatch();
   };
 
@@ -612,6 +638,11 @@ function BatchDetailModal({
             <div className="flex items-center gap-2">
               {activeTab === "students" && (
                 <>
+                  {students.length > 0 && (
+                    <Button size="sm" variant="outline" className="gap-1.5 text-red-500 hover:text-red-600 hover:border-red-300" onClick={() => setShowRemoveAll(true)}>
+                      <Trash2 className="w-3.5 h-3.5" /> Remove All
+                    </Button>
+                  )}
                   <Button size="sm" variant="outline" className="gap-1.5" onClick={() => setShowCSV(true)}>
                     <FileText className="w-4 h-4" /> Import CSV
                   </Button>
@@ -660,14 +691,25 @@ function BatchDetailModal({
                         <p className="text-sm font-semibold text-foreground truncate">{student.name}</p>
                         <p className="text-xs text-muted-foreground truncate">{student.email}</p>
                       </div>
-                      <button
-                        onClick={() => handleRemoveStudent(student)}
-                        disabled={removingId === student.id}
-                        className="opacity-0 group-hover:opacity-100 flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs text-red-500 hover:bg-red-500/10 transition-all"
-                      >
-                        {removingId === student.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <UserMinus className="w-3.5 h-3.5" />}
-                        Remove
-                      </button>
+                      <div className="opacity-0 group-hover:opacity-100 flex items-center gap-1 transition-all">
+                        <button
+                          onClick={() => handleRemoveStudent(student)}
+                          disabled={removingId === student.id}
+                          title="Remove from batch"
+                          className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs text-orange-500 hover:bg-orange-500/10 transition-colors disabled:opacity-50"
+                        >
+                          {removingId === student.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <UserMinus className="w-3.5 h-3.5" />}
+                          Remove
+                        </button>
+                        <button
+                          onClick={() => setConfirmDeleteUser(student)}
+                          title="Delete user account"
+                          className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs text-red-500 hover:bg-red-500/10 transition-colors"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          Delete User
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -780,6 +822,58 @@ function BatchDetailModal({
 
       {showCSV && (
         <CSVImportModal batchId={batchId} onClose={() => setShowCSV(false)} onImported={fetchBatch} />
+      )}
+
+      {/* Remove all students confirmation */}
+      {showRemoveAll && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm">
+          <div className="bg-card border border-border rounded-xl p-6 w-full max-w-sm shadow-xl">
+            <h3 className="text-base font-semibold text-foreground mb-2">Remove all students?</h3>
+            <p className="text-sm text-muted-foreground mb-5">
+              This will remove all <span className="font-semibold text-foreground">{students.length}</span> students from <span className="font-semibold text-foreground">{batch?.name}</span>. Their accounts will not be deleted — they will just no longer be in this batch.
+            </p>
+            <div className="flex gap-2">
+              <Button variant="outline" className="flex-1" onClick={() => setShowRemoveAll(false)} disabled={removingAll}>Cancel</Button>
+              <Button className="flex-1 bg-red-500 hover:bg-red-600 text-white" onClick={handleRemoveAll} disabled={removingAll}>
+                {removingAll && <Loader2 className="w-4 h-4 animate-spin mr-1.5" />}
+                Remove All
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete user account confirmation */}
+      {confirmDeleteUser && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm">
+          <div className="bg-card border border-border rounded-xl p-6 w-full max-w-sm shadow-xl">
+            <h3 className="text-base font-semibold text-foreground mb-2">Delete user account?</h3>
+            <p className="text-sm text-muted-foreground mb-1">
+              This will <span className="font-semibold text-red-500">permanently delete</span> the account for:
+            </p>
+            <div className="flex items-center gap-3 p-3 rounded-lg bg-muted/40 my-3">
+              <div className="w-9 h-9 rounded-full flex items-center justify-center text-[#1A1A1A] font-bold shrink-0" style={{ background: "var(--gold)" }}>
+                {avatarInitial(confirmDeleteUser.name)}
+              </div>
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-foreground truncate">{confirmDeleteUser.name}</p>
+                <p className="text-xs text-muted-foreground truncate">{confirmDeleteUser.email}</p>
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground mb-5">This cannot be undone. All their data, progress, and test attempts will be lost.</p>
+            <div className="flex gap-2">
+              <Button variant="outline" className="flex-1" onClick={() => setConfirmDeleteUser(null)} disabled={!!deletingUserId}>Cancel</Button>
+              <Button
+                className="flex-1 bg-red-500 hover:bg-red-600 text-white"
+                onClick={() => handleDeleteUser(confirmDeleteUser)}
+                disabled={!!deletingUserId}
+              >
+                {deletingUserId && <Loader2 className="w-4 h-4 animate-spin mr-1.5" />}
+                Delete Account
+              </Button>
+            </div>
+          </div>
+        </div>
       )}
     </>
   );

@@ -619,6 +619,9 @@ export const addStudentToBatch = (batchId: string, studentId: string) =>
 export const removeStudentFromBatch = (batchId: string, studentId: string) =>
   apiFetch(`/api/batches/${batchId}/students/${studentId}`, { method: "DELETE" });
 
+export const removeAllStudentsFromBatch = (batchId: string) =>
+  apiFetch(`/api/batches/${batchId}/students`, { method: "DELETE" });
+
 export const bulkAddStudentsToBatch = (batchId: string, emails: string[]) =>
   apiFetch(`/api/batches/${batchId}/students/bulk`, {
     method: "POST",

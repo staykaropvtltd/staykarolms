@@ -205,6 +205,21 @@ router.delete("/:id/courses/:courseId", authenticate, requireRole("admin", "supe
   }
 });
 
+// DELETE /api/batches/:id/students — remove ALL students from a batch
+router.delete("/:id/students", authenticate, requireRole("admin", "super-admin"), async (req, res, next) => {
+  try {
+    const { error, count } = await supabase
+      .from("batch_students")
+      .delete({ count: "exact" })
+      .eq("batch_id", req.params.id);
+
+    if (error) return res.status(400).json({ error: error.message });
+    return res.json({ data: { removed: count ?? 0 } });
+  } catch (err) {
+    return next(err);
+  }
+});
+
 // POST /api/batches/:id/students — add student to batch and enroll them in all batch courses
 router.post("/:id/students", authenticate, requireRole("admin", "faculty", "super-admin"), async (req, res, next) => {
   const { student_id } = req.body;
