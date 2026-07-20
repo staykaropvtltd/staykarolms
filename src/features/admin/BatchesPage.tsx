@@ -639,8 +639,8 @@ function BatchDetailModal({
               {activeTab === "students" && (
                 <>
                   {students.length > 0 && (
-                    <Button size="sm" variant="outline" className="gap-1.5 text-red-500 hover:text-red-600 hover:border-red-300" onClick={() => setShowRemoveAll(true)}>
-                      <Trash2 className="w-3.5 h-3.5" /> Remove All
+                    <Button size="sm" variant="outline" className="text-red-500 hover:text-red-600 hover:border-red-300 px-2" onClick={() => setShowRemoveAll(true)} title="Remove all students">
+                      <Trash2 className="w-3.5 h-3.5" />
                     </Button>
                   )}
                   <Button size="sm" variant="outline" className="gap-1.5" onClick={() => setShowCSV(true)}>
