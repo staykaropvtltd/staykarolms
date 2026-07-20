@@ -12,6 +12,7 @@ import {
   updateTest, archiveTest, restoreTest, forceDeleteTest,
   getTestAttempts, getBatches,
   getTest, updateTestQuestion, deleteTestQuestion, getAttemptResult,
+  grantRetake,
 } from "@/shared/lib/api";
 import { toast } from "sonner";
 
@@ -622,6 +623,11 @@ function TestResultsModal({ test, onClose }: { test: any; onClose: () => void })
   const [selectedAttempt, setSelectedAttempt] = useState<any | null>(null);
   const [detail, setDetail] = useState<any | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [grantingId, setGrantingId] = useState<string | null>(null);
+
+  const refreshAttempts = () => {
+    getTestAttempts(test.id).then(({ data }) => setAttempts(data || []));
+  };
 
   useEffect(() => {
     getTestAttempts(test.id).then(({ data }) => {
@@ -629,6 +635,16 @@ function TestResultsModal({ test, onClose }: { test: any; onClose: () => void })
       setLoading(false);
     });
   }, [test.id]);
+
+  const handleGrantRetake = async (e: React.MouseEvent, attempt: any) => {
+    e.stopPropagation();
+    setGrantingId(attempt.id);
+    const { error } = await grantRetake(attempt.id);
+    setGrantingId(null);
+    if (error) { toast.error(error); return; }
+    toast.success(`Retake granted for ${attempt.profiles?.name ?? "student"}`);
+    refreshAttempts();
+  };
 
   const handleSelectAttempt = async (attempt: any) => {
     setSelectedAttempt(attempt);
@@ -706,11 +722,13 @@ function TestResultsModal({ test, onClose }: { test: any; onClose: () => void })
                     <th className="px-6 py-3 text-left font-semibold">Status</th>
                     <th className="px-6 py-3 text-left font-semibold">Score</th>
                     <th className="px-6 py-3 text-left font-semibold">Submitted</th>
-                    <th className="px-6 py-3 w-8" />
+                    <th className="px-6 py-3 w-36" />
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
-                  {attempts.map((attempt: any) => (
+                  {attempts.map((attempt: any) => {
+                    const isFlagged = !!attempt.flagged_reason && !attempt.retake_granted;
+                    return (
                     <tr
                       key={attempt.id}
                       onClick={() => handleSelectAttempt(attempt)}
@@ -728,13 +746,25 @@ function TestResultsModal({ test, onClose }: { test: any; onClose: () => void })
                         </div>
                       </td>
                       <td className="px-6 py-3">
-                        <span className={`px-2 py-1 text-xs font-bold rounded-full ${
-                          attempt.status === "submitted"
-                            ? "bg-green-500/10 text-green-600"
-                            : "bg-yellow-500/10 text-yellow-600"
-                        }`}>
-                          {attempt.status === "submitted" ? "Submitted" : "In Progress"}
-                        </span>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className={`px-2 py-1 text-xs font-bold rounded-full ${
+                            attempt.status === "submitted"
+                              ? "bg-green-500/10 text-green-600"
+                              : "bg-yellow-500/10 text-yellow-600"
+                          }`}>
+                            {attempt.status === "submitted" ? "Submitted" : "In Progress"}
+                          </span>
+                          {attempt.flagged_reason && (
+                            <span className={`px-2 py-1 text-xs font-bold rounded-full flex items-center gap-1 ${
+                              attempt.retake_granted
+                                ? "bg-blue-500/10 text-blue-600"
+                                : "bg-red-500/10 text-red-600"
+                            }`}>
+                              <AlertTriangle className="w-3 h-3" />
+                              {attempt.retake_granted ? "Retake Granted" : "Flagged"}
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td className="px-6 py-3">
                         {attempt.status === "submitted"
@@ -744,11 +774,25 @@ function TestResultsModal({ test, onClose }: { test: any; onClose: () => void })
                       <td className="px-6 py-3 text-muted-foreground text-xs">
                         {attempt.submitted_at ? new Date(attempt.submitted_at).toLocaleString() : "—"}
                       </td>
-                      <td className="px-6 py-3 text-muted-foreground">
-                        <ChevronRight className="w-4 h-4" />
+                      <td className="px-6 py-3" onClick={e => e.stopPropagation()}>
+                        {isFlagged ? (
+                          <button
+                            onClick={(e) => handleGrantRetake(e, attempt)}
+                            disabled={grantingId === attempt.id}
+                            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-blue-500/10 text-blue-600 hover:bg-blue-500/20 transition-colors disabled:opacity-50"
+                          >
+                            {grantingId === attempt.id
+                              ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                              : <RotateCcw className="w-3.5 h-3.5" />}
+                            Grant Retake
+                          </button>
+                        ) : (
+                          <ChevronRight className="w-4 h-4 text-muted-foreground" />
+                        )}
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

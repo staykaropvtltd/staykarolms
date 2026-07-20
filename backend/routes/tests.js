@@ -176,6 +176,9 @@ router.get(
           score,
           started_at,
           submitted_at,
+          auto_submitted,
+          flagged_reason,
+          retake_granted,
           profiles:student_id ( id, name, email )
         `)
         .eq("test_id", req.params.id)

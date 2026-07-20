@@ -41,10 +41,11 @@ router.post("/start", authenticate, requireRole("student"), async (req, res, nex
   if (!test_id) return res.status(400).json({ error: "test_id is required" });
 
   try {
-    // Fetch test metadata and any existing in-progress attempt in parallel
+    // Fetch test, any in-progress attempt, and any unresolved flagged attempt in parallel
     const [
       { data: test, error: testError },
       { data: existing },
+      { data: flagged },
     ] = await Promise.all([
       supabase.from("tests").select("id, institution_id, status").eq("id", test_id).single(),
       supabase.from("test_attempts")
@@ -52,6 +53,14 @@ router.post("/start", authenticate, requireRole("student"), async (req, res, nex
         .eq("test_id", test_id)
         .eq("student_id", req.user.id)
         .eq("status", "in_progress")
+        .maybeSingle(),
+      supabase.from("test_attempts")
+        .select("id, flagged_reason")
+        .eq("test_id", test_id)
+        .eq("student_id", req.user.id)
+        .eq("status", "submitted")
+        .eq("retake_granted", false)
+        .not("flagged_reason", "is", null)
         .maybeSingle(),
     ]);
 
@@ -63,6 +72,15 @@ router.post("/start", authenticate, requireRole("student"), async (req, res, nex
 
     if (test.status !== "published") {
       return res.status(403).json({ error: "Test is not available for attempts" });
+    }
+
+    // Block students whose previous attempt was terminated for suspicious activity
+    // until an admin explicitly grants a retake.
+    if (flagged) {
+      return res.status(403).json({
+        error: "test_flagged",
+        message: "Your previous attempt was terminated due to suspicious activity. Contact your instructor to get permission to retake this test.",
+      });
     }
 
     if (existing) {
@@ -199,6 +217,7 @@ router.post("/:id/answer", authenticate, requireRole("student"), async (req, res
 router.post("/:id/submit", authenticate, requireRole("student"), async (req, res, next) => {
   const attemptId    = req.params.id;
   const autoSubmitted = !!(req.body && req.body.auto_submitted);
+  const flaggedReason = (req.body && req.body.flagged_reason) ? String(req.body.flagged_reason) : null;
 
   try {
     // Fetch attempt — we need test_id before we can fetch the test,
@@ -225,7 +244,8 @@ router.post("/:id/submit", authenticate, requireRole("student"), async (req, res
       supabase.from("test_answers").select("*, test_questions(*)").eq("attempt_id", attemptId),
     ]);
 
-    if (test?.duration_mins) {
+    // Skip time check when flagged — cheating detection always wins over the grace period
+    if (test?.duration_mins && !flaggedReason) {
       const elapsedMins = (Date.now() - new Date(attempt.started_at).getTime()) / 60000;
       if (elapsedMins > test.duration_mins + 2) {
         return res.status(403).json({ error: "Test time has expired" });
@@ -284,6 +304,7 @@ router.post("/:id/submit", authenticate, requireRole("student"), async (req, res
         submitted_at:   new Date().toISOString(),
         score:          totalScore,
         auto_submitted: autoSubmitted,
+        flagged_reason: flaggedReason,
         correct_count:  correctCount,
         wrong_count:    wrongCount,
         answered_count: answeredCount,
@@ -362,6 +383,35 @@ router.get("/:id/result", authenticate, async (req, res, next) => {
     };
 
     return res.json({ data: normalizedAttempt });
+  } catch (err) {
+    return next(err);
+  }
+});
+
+// POST /api/attempts/:id/grant-retake — admin/faculty grants retake after flagged termination
+router.post("/:id/grant-retake", authenticate, requireRole("admin", "faculty", "super-admin"), async (req, res, next) => {
+  try {
+    const { data, error } = await supabase
+      .from("test_attempts")
+      .update({
+        retake_granted:    true,
+        retake_granted_by: req.user.id,
+        retake_granted_at: new Date().toISOString(),
+      })
+      .eq("id", req.params.id)
+      .not("flagged_reason", "is", null)
+      .select()
+      .single();
+
+    if (error || !data) return res.status(404).json({ error: "Flagged attempt not found" });
+
+    const { logAudit } = require("../lib/audit");
+    logAudit(req, req.user, "grant_retake", "test_attempts", req.params.id, "info", "success", {
+      student_id: data.student_id,
+      test_id:    data.test_id,
+    }).catch(() => {});
+
+    return res.json({ data });
   } catch (err) {
     return next(err);
   }

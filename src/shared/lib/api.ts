@@ -457,11 +457,14 @@ export const saveAnswer = (
     body: JSON.stringify({ question_id: questionId, answer }),
   });
 
-export const submitAttempt = (attemptId: string, autoSubmitted = false) =>
+export const submitAttempt = (attemptId: string, autoSubmitted = false, flaggedReason?: string) =>
   apiFetch(`/api/attempts/${attemptId}/submit`, {
     method: "POST",
-    body: JSON.stringify({ auto_submitted: autoSubmitted }),
+    body: JSON.stringify({ auto_submitted: autoSubmitted, flagged_reason: flaggedReason ?? null }),
   });
+
+export const grantRetake = (attemptId: string) =>
+  apiFetch(`/api/attempts/${attemptId}/grant-retake`, { method: "POST" });
 
 export const getAttemptResult = (attemptId: string) =>
   apiFetch(`/api/attempts/${attemptId}/result`);

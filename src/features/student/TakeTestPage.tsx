@@ -1,6 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router";
-import { Clock, ChevronLeft, ChevronRight, Flag, CheckCircle2, AlertCircle, Loader2, Code2, AlignLeft } from "lucide-react";
+import { Clock, ChevronLeft, ChevronRight, Flag, CheckCircle2, AlertCircle, Loader2, Code2, AlignLeft, ShieldOff, AlertTriangle } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { getTest, startAttempt, saveAnswer, submitAttempt } from "@/shared/lib/api";
 import { toast } from "sonner";
@@ -14,6 +14,7 @@ export function TakeTestPage() {
   const [test, setTest] = useState<any>(null);
   const [attemptId, setAttemptId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isFlaggedBlocked, setIsFlaggedBlocked] = useState(false);
 
   const [currentQIndex, setCurrentQIndex] = useState(0);
   const [answers, setAnswers] = useState<AnswerState>({});
@@ -24,6 +25,11 @@ export function TakeTestPage() {
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [result, setResult] = useState<any>(null);
 
+  // Cheating detection — counts tab/app switches during the test
+  const tabSwitchCount = useRef(0);
+  const submitInProgress = useRef(false);
+  const [showTabWarning, setShowTabWarning] = useState(false);
+
   useEffect(() => {
     async function init() {
       setLoading(true);
@@ -32,9 +38,20 @@ export function TakeTestPage() {
         if (!testData) { toast.error("Test not found"); return; }
         setTest(testData);
         setTimeLeft((testData.duration_mins || 30) * 60);
-        const { data: attemptData } = await startAttempt(testId!);
+
+        const { data: attemptData, error: attemptError } = await startAttempt(testId!);
+        if (attemptError === "test_flagged" || (attemptData as any)?.error === "test_flagged") {
+          setIsFlaggedBlocked(true);
+          setLoading(false);
+          return;
+        }
         if (attemptData?.id) setAttemptId(attemptData.id);
       } catch (err: any) {
+        if (err.message?.includes("test_flagged") || err.message?.includes("terminated")) {
+          setIsFlaggedBlocked(true);
+          setLoading(false);
+          return;
+        }
         toast.error(err.message || "Failed to load test");
       }
       setLoading(false);
@@ -47,6 +64,53 @@ export function TakeTestPage() {
     const timer = setInterval(() => setTimeLeft((t) => t - 1), 1000);
     return () => clearInterval(timer);
   }, [timeLeft, isSubmitted, isReviewing]);
+
+  // Tab / app switch detection — one warning, then auto-submit
+  useEffect(() => {
+    if (!attemptId || isSubmitted) return;
+
+    const handleVisibilityChange = () => {
+      if (!document.hidden || isSubmitted || submitInProgress.current) return;
+      tabSwitchCount.current += 1;
+
+      if (tabSwitchCount.current === 1) {
+        setShowTabWarning(true);
+      } else {
+        // Second violation — terminate the test
+        handleFlaggedSubmit();
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [attemptId, isSubmitted]);
+
+  const handleFlaggedSubmit = async () => {
+    if (submitInProgress.current || isSubmitted) return;
+    submitInProgress.current = true;
+    setIsSubmitted(true);
+    setIsReviewing(false);
+    setShowTabWarning(false);
+
+    const totalMarks = (test?.test_questions || []).reduce((sum: number, q: any) => sum + (q.marks || 1), 0);
+    const timeTaken  = (test?.duration_mins || 30) * 60 - timeLeft;
+
+    if (attemptId) {
+      const { data: submitData } = await submitAttempt(attemptId, true, "tab_switch");
+      setResult({
+        score:      submitData?.score ?? 0,
+        maxScore:   totalMarks,
+        correct:    submitData?.correct_count ?? 0,
+        wrong:      submitData?.wrong_count ?? 0,
+        unanswered: (test?.test_questions || []).length - (submitData?.answered_count ?? 0),
+        timeTaken,
+        flagged:    true,
+      });
+    } else {
+      setResult({ score: 0, maxScore: totalMarks, correct: 0, wrong: 0, unanswered: 0, timeTaken, flagged: true });
+    }
+  };
 
   // Auto-submit when timer expires (test and attemptId must already be set)
   useEffect(() => {
@@ -83,6 +147,31 @@ export function TakeTestPage() {
       <span className="text-muted-foreground">Loading test…</span>
     </div>
   );
+
+  // Blocked: previous attempt was flagged and admin hasn't granted retake yet
+  if (isFlaggedBlocked) {
+    return (
+      <div className="fixed inset-0 z-50 bg-background flex items-center justify-center p-4">
+        <div className="max-w-md w-full bg-card border border-red-500/30 rounded-2xl p-8 text-center space-y-4 shadow-xl">
+          <div className="w-20 h-20 mx-auto rounded-full bg-red-500/10 flex items-center justify-center">
+            <ShieldOff className="w-10 h-10 text-red-500" />
+          </div>
+          <h1 className="text-2xl font-bold text-foreground">Test Access Blocked</h1>
+          <p className="text-muted-foreground text-sm leading-relaxed">
+            Your previous attempt was terminated because a tab switch or application change was detected during the test.
+            Contact your instructor to request permission to retake.
+          </p>
+          <button
+            onClick={() => navigate("/student/dashboard")}
+            className="w-full py-3 bg-primary text-primary-foreground font-bold rounded-xl hover:opacity-90 transition-opacity"
+          >
+            Back to Dashboard
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   if (!test) return null;
 
   const questions: any[] = test.test_questions || [];
@@ -125,6 +214,37 @@ export function TakeTestPage() {
 
   // ── Result Screen ─────────────────────────────────────────────────────────
   if (isSubmitted && result) {
+    // Flagged result — show termination notice instead of score
+    if (result.flagged) {
+      return (
+        <div className="fixed inset-0 z-50 bg-background flex flex-col items-center justify-center p-4">
+          <div className="max-w-md w-full bg-card border border-red-500/30 rounded-2xl p-8 text-center space-y-5 shadow-xl">
+            <div className="w-20 h-20 mx-auto rounded-full bg-red-500/10 flex items-center justify-center">
+              <AlertTriangle className="w-10 h-10 text-red-500" />
+            </div>
+            <div>
+              <span className="inline-block px-4 py-1 rounded-full text-xs font-black tracking-widest uppercase bg-red-500/15 text-red-600 border border-red-500/30 mb-3">
+                Test Terminated
+              </span>
+              <h1 className="text-2xl font-bold">Suspicious Activity Detected</h1>
+            </div>
+            <p className="text-muted-foreground text-sm leading-relaxed">
+              Your test <span className="font-semibold text-foreground">{test.title}</span> was automatically submitted because a tab switch or application change was detected.
+            </p>
+            <p className="text-muted-foreground text-sm">
+              Contact your instructor to request permission to retake this test.
+            </p>
+            <button
+              onClick={() => navigate("/student/dashboard")}
+              className="w-full py-3 bg-primary text-primary-foreground font-bold rounded-xl hover:opacity-90 transition-opacity"
+            >
+              Back to Dashboard
+            </button>
+          </div>
+        </div>
+      );
+    }
+
     const pct = result.maxScore > 0 ? Math.round((result.score / result.maxScore) * 100) : 0;
     const passThreshold = test.pass_percentage ?? 40;
     const passed = pct >= passThreshold;
@@ -272,6 +392,28 @@ export function TakeTestPage() {
   // ── Unified Test UI — all question types in one interface ─────────────────
   return (
     <div className="fixed inset-0 z-50 bg-background flex flex-col h-screen overflow-hidden">
+
+      {/* Tab-switch warning overlay */}
+      {showTabWarning && (
+        <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-card border-2 border-red-500 rounded-2xl p-8 max-w-md w-full text-center space-y-4 shadow-2xl">
+            <div className="w-16 h-16 mx-auto rounded-full bg-red-500/10 flex items-center justify-center">
+              <AlertTriangle className="w-8 h-8 text-red-500" />
+            </div>
+            <h2 className="text-xl font-black text-red-500 uppercase tracking-wide">⚠ Warning</h2>
+            <p className="font-semibold text-foreground">Tab switch detected!</p>
+            <p className="text-sm text-muted-foreground leading-relaxed">
+              This is your <strong>first and only warning</strong>. If you switch tabs or open another application again, your test will be <strong className="text-red-500">automatically submitted and terminated</strong>. You will not be able to retake it without instructor approval.
+            </p>
+            <button
+              onClick={() => setShowTabWarning(false)}
+              className="w-full py-3 bg-red-500 hover:bg-red-600 text-white font-bold rounded-xl transition-colors"
+            >
+              I understand — Return to Test
+            </button>
+          </div>
+        </div>
+      )}
       {/* Top Bar */}
       <header className="h-16 border-b flex items-center justify-between px-6 bg-card shrink-0 gap-4">
         <div className="flex items-center gap-4 min-w-0">
