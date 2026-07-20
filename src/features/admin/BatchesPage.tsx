@@ -691,7 +691,7 @@ function BatchDetailModal({
                         <p className="text-sm font-semibold text-foreground truncate">{student.name}</p>
                         <p className="text-xs text-muted-foreground truncate">{student.email}</p>
                       </div>
-                      <div className="opacity-0 group-hover:opacity-100 flex items-center gap-1 transition-all">
+                      <div className="opacity-0 group-hover:opacity-100 flex items-center gap-1 transition-all shrink-0">
                         <button
                           onClick={() => handleRemoveStudent(student)}
                           disabled={removingId === student.id}
