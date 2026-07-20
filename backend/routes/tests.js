@@ -256,22 +256,26 @@ router.get(
       const inProgress = attempts.filter(a => a.status === "in_progress");
       const submittedIds = submitted.map(a => a.id);
 
-      // Question-level answer stats (one query)
+      // Question-level answer stats — chunk .in() to stay under PostgREST URL limits
       const qStats = {}; // { [question_id]: { total, correct, wrong } }
       if (submittedIds.length > 0) {
-        const { data: allAnswers } = await supabase
-          .from("test_answers")
-          .select("attempt_id, question_id, is_correct, answer")
-          .in("attempt_id", submittedIds)
-          .limit(200000);
-
-        for (const ans of allAnswers || []) {
-          if (!qStats[ans.question_id]) qStats[ans.question_id] = { total: 0, correct: 0, wrong: 0 };
-          const has = ans.answer !== null && ans.answer !== undefined && ans.answer !== "";
-          if (has) {
-            qStats[ans.question_id].total++;
-            if (ans.is_correct) qStats[ans.question_id].correct++;
-            else qStats[ans.question_id].wrong++;
+        const CHUNK = 100;
+        const chunks = [];
+        for (let i = 0; i < submittedIds.length; i += CHUNK) chunks.push(submittedIds.slice(i, i + CHUNK));
+        const chunkResults = await Promise.all(chunks.map(ids =>
+          supabase.from("test_answers")
+            .select("attempt_id, question_id, is_correct, answer")
+            .in("attempt_id", ids)
+        ));
+        for (const { data: chunkAnswers } of chunkResults) {
+          for (const ans of chunkAnswers || []) {
+            if (!qStats[ans.question_id]) qStats[ans.question_id] = { total: 0, correct: 0, wrong: 0 };
+            const has = ans.answer !== null && ans.answer !== undefined && ans.answer !== "";
+            if (has) {
+              qStats[ans.question_id].total++;
+              if (ans.is_correct) qStats[ans.question_id].correct++;
+              else qStats[ans.question_id].wrong++;
+            }
           }
         }
       }
@@ -295,7 +299,8 @@ router.get(
       const passRate = subAug.length ? Math.round((passCount / subAug.length) * 100) : 0;
       const autoSubmittedCount = submitted.filter(a => a.auto_submitted).length;
 
-      const withTime = subAug.filter(a => a.time_taken_secs !== null)
+      const withTime = subAug
+        .filter(a => a.time_taken_secs !== null && Number.isFinite(a.time_taken_secs))
         .sort((a, b) => a.time_taken_secs - b.time_taken_secs);
       const avgTimeSecs = withTime.length
         ? Math.round(withTime.reduce((s, a) => s + a.time_taken_secs, 0) / withTime.length)
@@ -354,10 +359,11 @@ router.get(
         questions: enrichedQuestions,
         max_score: maxScore, total_questions: totalQuestions,
       };
-      await redis.set(cacheKey, JSON.stringify(responseData), 30);
+      try { await redis.set(cacheKey, JSON.stringify(responseData), 30); } catch (_) {}
       return res.json({ data: responseData });
     } catch (err) {
-      return next(err);
+      console.error("[tests/analytics/summary] error:", err.message, err.stack);
+      return res.status(500).json({ error: err.message || "Internal server error" });
     }
   }
 );
