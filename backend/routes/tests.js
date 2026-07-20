@@ -236,7 +236,7 @@ router.get(
         { data: allAttempts },
         { count: totalEnrolled },
       ] = await Promise.all([
-        supabase.from("institutions").select("name").eq("id", test.institution_id).maybeSingle().catch(() => ({ data: null })),
+        (async () => { try { return await supabase.from("institutions").select("name").eq("id", test.institution_id).maybeSingle(); } catch { return { data: null }; } })(),
         supabase
           .from("test_attempts")
           .select(

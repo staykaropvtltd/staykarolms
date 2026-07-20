@@ -6,12 +6,24 @@ const { requireRole } = require("../middleware/roleGuard");
 // GET /api/batches — list batches for current institution
 router.get("/", authenticate, async (req, res, next) => {
   try {
-    const { data, error } = await supabase
+    let query = supabase
       .from("batches")
       .select("*, profiles:mentor_id(name, email)")
       .eq("institution_id", req.user.institution_id)
       .order("created_at", { ascending: false });
 
+    // Faculty can only see batches they are assigned to
+    if (req.user.role === "faculty") {
+      const { data: assigned } = await supabase
+        .from("batch_faculty")
+        .select("batch_id")
+        .eq("faculty_id", req.user.id);
+      const assignedIds = (assigned || []).map(r => r.batch_id);
+      if (assignedIds.length === 0) return res.json({ data: [] });
+      query = query.in("id", assignedIds);
+    }
+
+    const { data, error } = await query;
     if (error) return res.status(400).json({ error: error.message });
     return res.json({ data: data || [] });
   } catch (err) {
@@ -66,8 +78,19 @@ router.get("/:id", authenticate, async (req, res, next) => {
     }
 
     const { data, error } = await query.single();
-
     if (error || !data) return res.status(404).json({ error: "Batch not found" });
+
+    // Faculty can only see batches they are assigned to
+    if (req.user.role === "faculty") {
+      const { data: bf } = await supabase
+        .from("batch_faculty")
+        .select("id")
+        .eq("batch_id", req.params.id)
+        .eq("faculty_id", req.user.id)
+        .maybeSingle();
+      if (!bf) return res.status(403).json({ error: "You are not assigned to this batch" });
+    }
+
     return res.json({ data });
   } catch (err) {
     return next(err);
@@ -353,6 +376,59 @@ router.post("/:id/students/bulk", authenticate, requireRole("admin", "super-admi
     return res.status(201).json({
       data: { added: profiles.length, not_found: notFound },
     });
+  } catch (err) {
+    return next(err);
+  }
+});
+
+// GET /api/batches/:id/faculty — list faculty assigned to a batch
+router.get("/:id/faculty", authenticate, requireRole("admin", "faculty", "super-admin"), async (req, res, next) => {
+  try {
+    const { data, error } = await supabase
+      .from("batch_faculty")
+      .select("id, assigned_at, profiles:faculty_id(id, name, email, avatar_url)")
+      .eq("batch_id", req.params.id);
+
+    if (error) return res.status(400).json({ error: error.message });
+    return res.json({ data: data || [] });
+  } catch (err) {
+    return next(err);
+  }
+});
+
+// POST /api/batches/:id/faculty — assign a faculty member to a batch
+router.post("/:id/faculty", authenticate, requireRole("admin", "super-admin"), async (req, res, next) => {
+  const { faculty_id } = req.body;
+  if (!faculty_id) return res.status(400).json({ error: "faculty_id is required" });
+
+  try {
+    const { data, error } = await supabase
+      .from("batch_faculty")
+      .upsert(
+        { batch_id: req.params.id, faculty_id, assigned_by: req.user.id },
+        { onConflict: "batch_id,faculty_id", ignoreDuplicates: true }
+      )
+      .select("id, assigned_at, profiles:faculty_id(id, name, email, avatar_url)")
+      .single();
+
+    if (error) return res.status(400).json({ error: error.message });
+    return res.status(201).json({ data });
+  } catch (err) {
+    return next(err);
+  }
+});
+
+// DELETE /api/batches/:id/faculty/:facultyId — remove a faculty member from a batch
+router.delete("/:id/faculty/:facultyId", authenticate, requireRole("admin", "super-admin"), async (req, res, next) => {
+  try {
+    const { error } = await supabase
+      .from("batch_faculty")
+      .delete()
+      .eq("batch_id", req.params.id)
+      .eq("faculty_id", req.params.facultyId);
+
+    if (error) return res.status(400).json({ error: error.message });
+    return res.json({ data: { message: "Faculty removed from batch" } });
   } catch (err) {
     return next(err);
   }

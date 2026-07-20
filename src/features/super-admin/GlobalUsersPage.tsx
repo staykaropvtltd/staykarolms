@@ -1,9 +1,10 @@
 import { useState, useEffect } from "react";
-import { Users, Search, X, ChevronLeft, ChevronRight, UserX, Mail, Loader2 } from "lucide-react";
+import { Users, Search, X, ChevronLeft, ChevronRight, UserX, Mail, Loader2, UserPlus } from "lucide-react";
 import { PageHeader } from "@/shared/components/PageHeader";
 import { StatCard } from "@/shared/components/StatCard";
 import { Button } from "@/shared/components/ui/button";
-import { getUsers, getInstitutions } from "@/shared/lib/api";
+import { getUsers, getInstitutions, createUser } from "@/shared/lib/api";
+import { toast } from "sonner";
 
 export type GlobalUser = {
   id: string;
@@ -40,6 +41,7 @@ export function GlobalUsersPage() {
   const [statusFilter, setStatusFilter] = useState("All");
   const [tenantFilter, setTenantFilter] = useState("All");
   const [page, setPage] = useState(1);
+  const [showCreate, setShowCreate] = useState(false);
 
   const fetchUsers = async () => {
     setLoading(true);
@@ -89,6 +91,12 @@ export function GlobalUsersPage() {
       <PageHeader
         title="Global Users"
         description="Cross-tenant user management — search, filter, and act on any user across the platform."
+        actions={
+          <Button onClick={() => setShowCreate(true)} className="gap-2">
+            <UserPlus className="w-4 h-4" />
+            Create User
+          </Button>
+        }
       />
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
@@ -194,6 +202,124 @@ export function GlobalUsersPage() {
             <Button variant="outline" size="sm" disabled={page === totalPages} onClick={() => setPage(p => p + 1)}>Next <ChevronRight className="size-4" /></Button>
           </div>
         )}
+      </div>
+      {showCreate && (
+        <CreateUserModal
+          onClose={() => setShowCreate(false)}
+          onCreated={() => { fetchUsers(); setShowCreate(false); }}
+        />
+      )}
+    </div>
+  );
+}
+
+function CreateUserModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+  const [form, setForm] = useState({ name: "", email: "", password: "", role: "admin", institution_id: "" });
+  const [institutions, setInstitutions] = useState<any[]>([]);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    getInstitutions().then(({ data }) => setInstitutions((data as any[]) || []));
+  }, []);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!form.name || !form.email || !form.password || !form.institution_id) {
+      toast.error("All fields are required");
+      return;
+    }
+    setSaving(true);
+    const { error } = await createUser({
+      name: form.name,
+      email: form.email,
+      password: form.password,
+      role: form.role,
+      institution_id: form.institution_id,
+    });
+    setSaving(false);
+    if (error) { toast.error(error); return; }
+    toast.success(`${form.role === "super-admin" ? "Super Admin" : "Admin"} account created`);
+    onCreated();
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+      <div className="bg-card border border-border rounded-2xl w-full max-w-md shadow-2xl">
+        <div className="flex items-center justify-between p-6 border-b border-border">
+          <h2 className="text-lg font-semibold text-foreground">Create Admin Account</h2>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+          <div>
+            <label className="text-xs font-medium text-muted-foreground">Full name *</label>
+            <input
+              value={form.name}
+              onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
+              required
+              placeholder="e.g. Priya Sharma"
+              className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+            />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-muted-foreground">Email *</label>
+            <input
+              type="email"
+              value={form.email}
+              onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
+              required
+              placeholder="admin@institution.edu"
+              className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+            />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-muted-foreground">Password *</label>
+            <input
+              type="password"
+              value={form.password}
+              onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
+              required
+              placeholder="Minimum 8 characters"
+              minLength={8}
+              className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+            />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-muted-foreground">Role *</label>
+            <select
+              value={form.role}
+              onChange={e => setForm(f => ({ ...f, role: e.target.value }))}
+              className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+            >
+              <option value="admin">Admin</option>
+              <option value="super-admin">Super Admin</option>
+            </select>
+          </div>
+          <div>
+            <label className="text-xs font-medium text-muted-foreground">Institution *</label>
+            <select
+              value={form.institution_id}
+              onChange={e => setForm(f => ({ ...f, institution_id: e.target.value }))}
+              required
+              className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+            >
+              <option value="">Select institution…</option>
+              {institutions.map((inst: any) => (
+                <option key={inst.id} value={inst.id}>{inst.name}</option>
+              ))}
+            </select>
+          </div>
+          <div className="flex gap-2 pt-2">
+            <Button type="submit" className="flex-1" disabled={saving}>
+              {saving && <Loader2 className="w-4 h-4 animate-spin mr-1.5" />}
+              Create Account
+            </Button>
+            <Button variant="outline" type="button" onClick={onClose} disabled={saving}>
+              Cancel
+            </Button>
+          </div>
+        </form>
       </div>
     </div>
   );

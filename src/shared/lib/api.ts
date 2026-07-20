@@ -649,6 +649,18 @@ export const assignCourseToBatch = (batchId: string, courseId: string) =>
 export const removeCourseFromBatch = (batchId: string, courseId: string) =>
   apiFetch(`/api/batches/${batchId}/courses/${courseId}`, { method: "DELETE" });
 
+export const getBatchFaculty = (batchId: string) =>
+  apiFetch(`/api/batches/${batchId}/faculty`);
+
+export const addFacultyToBatch = (batchId: string, facultyId: string) =>
+  apiFetch(`/api/batches/${batchId}/faculty`, {
+    method: "POST",
+    body: JSON.stringify({ faculty_id: facultyId }),
+  });
+
+export const removeFacultyFromBatch = (batchId: string, facultyId: string) =>
+  apiFetch(`/api/batches/${batchId}/faculty/${facultyId}`, { method: "DELETE" });
+
 // ── Live Classes ──────────────────────────────────────────────────────────────
 
 export const getLiveClasses = (status?: string) =>
