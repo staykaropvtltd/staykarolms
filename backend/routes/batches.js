@@ -253,6 +253,31 @@ router.post("/:id/students", authenticate, requireRole("admin", "faculty", "supe
   }
 });
 
+// DELETE /api/batches/:id/students/delete-accounts — hard-delete all student accounts in batch
+router.delete("/:id/students/delete-accounts", authenticate, requireRole("admin", "super-admin"), async (req, res, next) => {
+  try {
+    const { data: batchStudents, error } = await supabase
+      .from("batch_students")
+      .select("student_id")
+      .eq("batch_id", req.params.id);
+
+    if (error) return res.status(400).json({ error: error.message });
+    if (!batchStudents || batchStudents.length === 0) return res.json({ data: { deleted: 0 } });
+
+    const ids = batchStudents.map(bs => bs.student_id);
+    let deleted = 0;
+    for (let i = 0; i < ids.length; i += 10) {
+      const chunk = ids.slice(i, i + 10);
+      const results = await Promise.allSettled(chunk.map(id => supabase.auth.admin.deleteUser(id)));
+      deleted += results.filter(r => r.status === "fulfilled").length;
+    }
+
+    return res.json({ data: { deleted } });
+  } catch (err) {
+    return next(err);
+  }
+});
+
 // DELETE /api/batches/:id/students/:studentId — remove student from batch
 router.delete("/:id/students/:studentId", authenticate, requireRole("admin", "super-admin"), async (req, res, next) => {
   try {

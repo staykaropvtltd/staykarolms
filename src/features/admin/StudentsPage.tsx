@@ -11,6 +11,7 @@ import { StatCard } from "@/shared/components/StatCard";
 import { Button } from "@/shared/components/ui/button";
 import {
   getUsers, getUser, createUser, updateUser, deleteUser, getBatches, importNominalRoll,
+  getUnbatchedStudents, deleteUnbatchedStudents,
 } from "@/shared/lib/api";
 import { toast } from "sonner";
 
@@ -910,17 +911,32 @@ export function StudentsPage({ userType }: StudentsPageProps) {
   const [showAdd, setShowAdd] = useState(false);
   const [showNominalRoll, setShowNominalRoll] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [unbatchedOnly, setUnbatchedOnly] = useState(false);
+  const [showDeleteUnbatched, setShowDeleteUnbatched] = useState(false);
+  const [deletingUnbatched, setDeletingUnbatched] = useState(false);
 
   const fetchStudents = async () => {
     setLoading(true);
     setError(null);
-    const { data, error: err } = await getUsers("student");
+    const { data, error: err } = unbatchedOnly
+      ? await getUnbatchedStudents()
+      : await getUsers("student");
     if (err) setError(err);
     else setStudents((data as ApiStudent[]) || []);
     setLoading(false);
   };
 
-  useEffect(() => { fetchStudents(); }, []);
+  useEffect(() => { fetchStudents(); }, [unbatchedOnly]);
+
+  const handleDeleteUnbatched = async () => {
+    setDeletingUnbatched(true);
+    const { data, error } = await deleteUnbatchedStudents();
+    setDeletingUnbatched(false);
+    if (error) { toast.error(error); return; }
+    toast.success(`${(data as any)?.deleted ?? 0} student accounts permanently deleted`);
+    setShowDeleteUnbatched(false);
+    fetchStudents();
+  };
 
   const filtered = students.filter(s => {
     const q = search.toLowerCase();
@@ -957,6 +973,32 @@ export function StudentsPage({ userType }: StudentsPageProps) {
     <div className="p-8">
       {showAdd && <AddStudentModal onClose={() => setShowAdd(false)} onCreated={fetchStudents} />}
       {showNominalRoll && <NominalRollImportModal onClose={() => setShowNominalRoll(false)} onImported={fetchStudents} />}
+
+      {showDeleteUnbatched && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+          <div className="bg-card border border-border rounded-xl p-6 w-full max-w-sm shadow-xl">
+            <h3 className="text-base font-semibold text-foreground mb-2">Delete all unbatched students?</h3>
+            <p className="text-sm text-muted-foreground mb-3">
+              This will <span className="font-semibold text-red-500">permanently delete</span> all{" "}
+              <span className="font-semibold text-foreground">{students.length}</span> students who are not assigned to any batch.
+            </p>
+            <div className="rounded-lg bg-red-500/10 border border-red-500/20 px-3 py-2.5 mb-5">
+              <p className="text-xs text-red-600 font-medium">This cannot be undone. All data, progress, and test history will be lost.</p>
+              {students.length > 100 && (
+                <p className="text-xs text-muted-foreground mt-1">This may take up to a minute for {students.length} students.</p>
+              )}
+            </div>
+            <div className="flex gap-2">
+              <Button variant="outline" className="flex-1" onClick={() => setShowDeleteUnbatched(false)} disabled={deletingUnbatched}>Cancel</Button>
+              <Button className="flex-1 bg-red-600 hover:bg-red-700 text-white" onClick={handleDeleteUnbatched} disabled={deletingUnbatched}>
+                {deletingUnbatched && <Loader2 className="w-4 h-4 animate-spin mr-1.5" />}
+                {deletingUnbatched ? "Deleting…" : "Delete All"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {selectedId && (
         <StudentDetailModal
           studentId={selectedId}
@@ -1002,14 +1044,25 @@ export function StudentsPage({ userType }: StudentsPageProps) {
             className="w-full pl-9 pr-3 py-2 text-sm rounded-md border border-border bg-background"
           />
         </div>
-        <select
-          value={statusFilter}
-          onChange={e => { setStatusFilter(e.target.value); setPage(1); }}
-          className="px-3 py-2 text-sm rounded-md border border-border bg-background"
+        {!unbatchedOnly && (
+          <select
+            value={statusFilter}
+            onChange={e => { setStatusFilter(e.target.value); setPage(1); }}
+            className="px-3 py-2 text-sm rounded-md border border-border bg-background"
+          >
+            {["All", "Active", "At risk", "Inactive"].map(s => <option key={s}>{s}</option>)}
+          </select>
+        )}
+        <Button
+          size="sm"
+          variant={unbatchedOnly ? "default" : "outline"}
+          className={unbatchedOnly ? "bg-amber-500 hover:bg-amber-600 text-white border-0" : "gap-1.5"}
+          onClick={() => { setUnbatchedOnly(v => !v); setSearch(""); setStatusFilter("All"); setPage(1); }}
         >
-          {["All", "Active", "At risk", "Inactive"].map(s => <option key={s}>{s}</option>)}
-        </select>
-        {(search || statusFilter !== "All") && (
+          <Layers className="size-4" />
+          {unbatchedOnly ? "Showing Unbatched" : "Unbatched Only"}
+        </Button>
+        {(search || statusFilter !== "All") && !unbatchedOnly && (
           <Button variant="ghost" size="sm" onClick={() => { setSearch(""); setStatusFilter("All"); setPage(1); }}>
             <X className="size-4 mr-1" /> Clear
           </Button>
@@ -1019,8 +1072,18 @@ export function StudentsPage({ userType }: StudentsPageProps) {
       {/* Table */}
       <div className="bg-card border border-border rounded-xl overflow-hidden">
         <div className="px-6 py-3 border-b border-border flex items-center justify-between">
-          <span className="text-sm text-muted-foreground">{filtered.length} student{filtered.length !== 1 ? "s" : ""}</span>
-          <span className="text-sm text-muted-foreground">Page {page} / {totalPages || 1}</span>
+          <span className="text-sm text-muted-foreground">
+            {filtered.length} student{filtered.length !== 1 ? "s" : ""}
+            {unbatchedOnly && <span className="ml-1.5 text-amber-600 font-medium">· not in any batch</span>}
+          </span>
+          <div className="flex items-center gap-3">
+            {unbatchedOnly && filtered.length > 0 && isAdmin && (
+              <Button size="sm" className="gap-1.5 bg-red-600 hover:bg-red-700 text-white" onClick={() => setShowDeleteUnbatched(true)}>
+                <Trash2 className="w-3.5 h-3.5" /> Delete All ({filtered.length})
+              </Button>
+            )}
+            <span className="text-sm text-muted-foreground">Page {page} / {totalPages || 1}</span>
+          </div>
         </div>
 
         <div className="overflow-x-auto">

@@ -10,7 +10,7 @@ import { Button } from "@/shared/components/ui/button";
 import { Switch } from "@/shared/components/ui/switch";
 import {
   getBatches, createBatch, getBatch, updateBatch,
-  addStudentToBatch, removeStudentFromBatch, removeAllStudentsFromBatch, bulkAddStudentsToBatch,
+  addStudentToBatch, removeStudentFromBatch, removeAllStudentsFromBatch, deleteBatchStudentAccounts, bulkAddStudentsToBatch,
   getBatchCourses, assignCourseToBatch, removeCourseFromBatch,
   getUsers, getCourses, deleteUser,
 } from "@/shared/lib/api";
@@ -482,9 +482,11 @@ function BatchDetailModal({
   );
   const [savingAccess, setSavingAccess] = useState(false);
 
-  // Remove-all and delete-user confirmation state
+  // Remove-all, delete-all-accounts, and delete-user confirmation state
   const [showRemoveAll, setShowRemoveAll] = useState(false);
   const [removingAll, setRemovingAll] = useState(false);
+  const [showDeleteAllAccounts, setShowDeleteAllAccounts] = useState(false);
+  const [deletingAllAccounts, setDeletingAllAccounts] = useState(false);
   const [confirmDeleteUser, setConfirmDeleteUser] = useState<BatchStudent | null>(null);
   const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
 
@@ -539,6 +541,16 @@ function BatchDetailModal({
     if (error) { toast.error(error); return; }
     toast.success("All students removed from batch");
     setShowRemoveAll(false);
+    fetchBatch();
+  };
+
+  const handleDeleteAllAccounts = async () => {
+    setDeletingAllAccounts(true);
+    const { data, error } = await deleteBatchStudentAccounts(batchId);
+    setDeletingAllAccounts(false);
+    if (error) { toast.error(error); return; }
+    toast.success(`${(data as any)?.deleted ?? 0} student accounts permanently deleted`);
+    setShowDeleteAllAccounts(false);
     fetchBatch();
   };
 
@@ -642,9 +654,14 @@ function BatchDetailModal({
               {activeTab === "students" && (
                 <>
                   {students.length > 0 && (
-                    <Button size="sm" variant="outline" className="gap-1.5 text-red-500 hover:text-red-600 hover:border-red-300" onClick={() => setShowRemoveAll(true)}>
-                      <Trash2 className="w-3.5 h-3.5" /> Remove All
-                    </Button>
+                    <>
+                      <Button size="sm" variant="outline" className="gap-1.5 text-red-500 hover:text-red-600 hover:border-red-300" onClick={() => setShowRemoveAll(true)}>
+                        <Trash2 className="w-3.5 h-3.5" /> Remove All
+                      </Button>
+                      <Button size="sm" className="gap-1.5 bg-red-600 hover:bg-red-700 text-white" onClick={() => setShowDeleteAllAccounts(true)}>
+                        <Trash2 className="w-3.5 h-3.5" /> Delete All Accounts
+                      </Button>
+                    </>
                   )}
                   <Button size="sm" variant="outline" className="gap-1.5" onClick={() => setShowCSV(true)}>
                     <FileText className="w-4 h-4" /> Import CSV
@@ -840,6 +857,33 @@ function BatchDetailModal({
               <Button className="flex-1 bg-red-500 hover:bg-red-600 text-white" onClick={handleRemoveAll} disabled={removingAll}>
                 {removingAll && <Loader2 className="w-4 h-4 animate-spin mr-1.5" />}
                 Remove All
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete ALL student accounts confirmation */}
+      {showDeleteAllAccounts && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm">
+          <div className="bg-card border border-border rounded-xl p-6 w-full max-w-sm shadow-xl">
+            <h3 className="text-base font-semibold text-foreground mb-2">Permanently delete all accounts?</h3>
+            <p className="text-sm text-muted-foreground mb-3">
+              This will <span className="font-semibold text-red-500">permanently delete</span> the accounts of all{" "}
+              <span className="font-semibold text-foreground">{students.length}</span> students in{" "}
+              <span className="font-semibold text-foreground">{batch?.name}</span>.
+            </p>
+            <div className="rounded-lg bg-red-500/10 border border-red-500/20 px-3 py-2.5 mb-5">
+              <p className="text-xs text-red-600 font-medium">This cannot be undone. All data, progress, and test history will be lost.</p>
+              {students.length > 100 && (
+                <p className="text-xs text-muted-foreground mt-1">This may take up to a minute for {students.length} students.</p>
+              )}
+            </div>
+            <div className="flex gap-2">
+              <Button variant="outline" className="flex-1" onClick={() => setShowDeleteAllAccounts(false)} disabled={deletingAllAccounts}>Cancel</Button>
+              <Button className="flex-1 bg-red-600 hover:bg-red-700 text-white" onClick={handleDeleteAllAccounts} disabled={deletingAllAccounts}>
+                {deletingAllAccounts && <Loader2 className="w-4 h-4 animate-spin mr-1.5" />}
+                {deletingAllAccounts ? "Deleting…" : "Delete All Accounts"}
               </Button>
             </div>
           </div>
