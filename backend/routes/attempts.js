@@ -46,6 +46,7 @@ router.post("/start", authenticate, requireRole("student"), async (req, res, nex
       { data: test, error: testError },
       { data: existing },
       { data: flagged },
+      { data: completed },
     ] = await Promise.all([
       supabase.from("tests").select("id, institution_id, status").eq("id", test_id).single(),
       supabase.from("test_attempts")
@@ -61,6 +62,14 @@ router.post("/start", authenticate, requireRole("student"), async (req, res, nex
         .eq("status", "submitted")
         .eq("retake_granted", false)
         .not("flagged_reason", "is", null)
+        .maybeSingle(),
+      supabase.from("test_attempts")
+        .select("id")
+        .eq("test_id", test_id)
+        .eq("student_id", req.user.id)
+        .eq("status", "submitted")
+        .is("flagged_reason", null)
+        .neq("retake_granted", true)
         .maybeSingle(),
     ]);
 
@@ -80,6 +89,14 @@ router.post("/start", authenticate, requireRole("student"), async (req, res, nex
       return res.status(403).json({
         error: "test_flagged",
         message: "Your previous attempt was terminated due to suspicious activity. Contact your instructor to get permission to retake this test.",
+      });
+    }
+
+    // Block students who already completed the test normally (no flagging)
+    if (completed) {
+      return res.status(403).json({
+        error: "already_submitted",
+        message: "You have already completed this test. Contact your instructor if you need to retake it.",
       });
     }
 

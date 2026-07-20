@@ -1,12 +1,24 @@
 import { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router";
-import { Clock, ChevronLeft, ChevronRight, Flag, CheckCircle2, AlertCircle, Loader2, Code2, AlignLeft, ShieldOff, AlertTriangle } from "lucide-react";
+import { Clock, ChevronLeft, ChevronRight, Flag, CheckCircle2, AlertCircle, Loader2, Code2, AlignLeft, ShieldOff, AlertTriangle, Maximize2 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { getTest, startAttempt, saveAnswer, submitAttempt } from "@/shared/lib/api";
 import { toast } from "sonner";
 
 type AnswerState = Record<string, string>;
 type FlagState = Record<string, boolean>;
+
+function seededShuffle<T>(arr: T[], seed: string): T[] {
+  const copy = [...arr];
+  let s = 0;
+  for (let i = 0; i < seed.length; i++) s = (s * 31 + seed.charCodeAt(i)) >>> 0;
+  for (let i = copy.length - 1; i > 0; i--) {
+    s = (s * 1664525 + 1013904223) >>> 0;
+    const j = s % (i + 1);
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy;
+}
 
 export function TakeTestPage() {
   const { testId } = useParams();
@@ -25,9 +37,14 @@ export function TakeTestPage() {
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [result, setResult] = useState<any>(null);
 
-  // Cheating detection — counts tab/app switches during the test
-  const tabSwitchCount = useRef(0);
+  const [testStarted, setTestStarted] = useState(false);
+  const [isAlreadySubmitted, setIsAlreadySubmitted] = useState(false);
+  const [questions, setQuestions] = useState<any[]>([]);
+
+  // Cheating detection — counts tab switches + fullscreen exits
+  const violationCount = useRef(0);
   const submitInProgress = useRef(false);
+  const isFullscreenRef = useRef(false);
   const [showTabWarning, setShowTabWarning] = useState(false);
 
   useEffect(() => {
@@ -45,7 +62,16 @@ export function TakeTestPage() {
           setLoading(false);
           return;
         }
-        if (attemptData?.id) setAttemptId(attemptData.id);
+        if (attemptError === "already_submitted" || (attemptData as any)?.error === "already_submitted") {
+          setIsAlreadySubmitted(true);
+          setLoading(false);
+          return;
+        }
+        if (attemptData?.id) {
+          setAttemptId(attemptData.id);
+          const raw: any[] = testData.test_questions || [];
+          setQuestions(raw.length > 0 ? seededShuffle(raw, attemptData.id) : raw);
+        }
       } catch (err: any) {
         if (err.message?.includes("test_flagged") || err.message?.includes("terminated")) {
           setIsFlaggedBlocked(true);
@@ -60,31 +86,47 @@ export function TakeTestPage() {
   }, [testId]);
 
   useEffect(() => {
-    if (timeLeft <= 0 || isSubmitted || isReviewing) return;
+    if (!testStarted || timeLeft <= 0 || isSubmitted || isReviewing) return;
     const timer = setInterval(() => setTimeLeft((t) => t - 1), 1000);
     return () => clearInterval(timer);
-  }, [timeLeft, isSubmitted, isReviewing]);
+  }, [testStarted, timeLeft, isSubmitted, isReviewing]);
 
-  // Tab / app switch detection — one warning, then auto-submit
+  // Tab switch + fullscreen exit detection — one warning, then auto-submit
   useEffect(() => {
-    if (!attemptId || isSubmitted) return;
+    if (!attemptId || isSubmitted || !testStarted) return;
 
-    const handleVisibilityChange = () => {
-      if (!document.hidden || isSubmitted || submitInProgress.current) return;
-      tabSwitchCount.current += 1;
-
-      if (tabSwitchCount.current === 1) {
+    const triggerViolation = () => {
+      if (isSubmitted || submitInProgress.current) return;
+      violationCount.current += 1;
+      if (violationCount.current === 1) {
         setShowTabWarning(true);
       } else {
-        // Second violation — terminate the test
         handleFlaggedSubmit();
       }
     };
 
+    const handleVisibilityChange = () => {
+      if (!document.hidden) return;
+      triggerViolation();
+    };
+
+    const handleFullscreenChange = () => {
+      const inFullscreen = !!document.fullscreenElement;
+      if (!inFullscreen && isFullscreenRef.current) {
+        isFullscreenRef.current = false;
+        triggerViolation();
+      }
+      if (inFullscreen) isFullscreenRef.current = true;
+    };
+
     document.addEventListener("visibilitychange", handleVisibilityChange);
-    return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      document.removeEventListener("fullscreenchange", handleFullscreenChange);
+    };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [attemptId, isSubmitted]);
+  }, [attemptId, isSubmitted, testStarted]);
 
   const handleFlaggedSubmit = async () => {
     if (submitInProgress.current || isSubmitted) return;
@@ -93,7 +135,7 @@ export function TakeTestPage() {
     setIsReviewing(false);
     setShowTabWarning(false);
 
-    const totalMarks = (test?.test_questions || []).reduce((sum: number, q: any) => sum + (q.marks || 1), 0);
+    const totalMarks = questions.reduce((sum: number, q: any) => sum + (q.marks || 1), 0);
     const timeTaken  = (test?.duration_mins || 30) * 60 - timeLeft;
 
     if (attemptId) {
@@ -103,7 +145,7 @@ export function TakeTestPage() {
         maxScore:   totalMarks,
         correct:    submitData?.correct_count ?? 0,
         wrong:      submitData?.wrong_count ?? 0,
-        unanswered: (test?.test_questions || []).length - (submitData?.answered_count ?? 0),
+        unanswered: questions.length - (submitData?.answered_count ?? 0),
         timeTaken,
         flagged:    true,
       });
@@ -112,28 +154,39 @@ export function TakeTestPage() {
     }
   };
 
-  // Auto-submit when timer expires (test and attemptId must already be set)
+  const handleBeginTest = async () => {
+    try {
+      await document.documentElement.requestFullscreen();
+      isFullscreenRef.current = true;
+    } catch {
+      // Fullscreen not supported or denied — proceed without enforcement
+    }
+    setTestStarted(true);
+  };
+
+  // Auto-submit when timer expires (only after test has started)
   useEffect(() => {
-    if (timeLeft !== 0 || isSubmitted || !attemptId || !test) return;
+    if (timeLeft !== 0 || isSubmitted || !attemptId || !test || !testStarted) return;
     (async () => {
       setIsSubmitted(true);
       toast.info("Time's up! Submitting automatically…");
       const { data: submitData } = await submitAttempt(attemptId, true);
-      const totalMarks = (test.test_questions || []).reduce((sum: number, q: any) => sum + (q.marks || 1), 0);
+      const totalMarks = questions.reduce((sum: number, q: any) => sum + (q.marks || 1), 0);
       if (submitData) {
         setResult({
           score:      submitData.score ?? 0,
           maxScore:   totalMarks,
           correct:    submitData.correct_count ?? 0,
           wrong:      submitData.wrong_count ?? 0,
-          unanswered: (test.test_questions || []).length - (submitData.answered_count ?? 0),
+          unanswered: questions.length - (submitData.answered_count ?? 0),
           timeTaken:  (test.duration_mins || 30) * 60,
         });
       } else {
-        setResult({ score: 0, maxScore: totalMarks, correct: 0, wrong: 0, unanswered: (test.test_questions || []).length, timeTaken: (test.duration_mins || 30) * 60 });
+        setResult({ score: 0, maxScore: totalMarks, correct: 0, wrong: 0, unanswered: questions.length, timeTaken: (test.duration_mins || 30) * 60 });
       }
     })();
-  }, [timeLeft, isSubmitted, attemptId, test]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [timeLeft, isSubmitted, attemptId, test, testStarted]);
 
   const formatTime = (sec: number) => {
     const m = Math.floor(sec / 60);
@@ -147,6 +200,28 @@ export function TakeTestPage() {
       <span className="text-muted-foreground">Loading test…</span>
     </div>
   );
+
+  if (isAlreadySubmitted) {
+    return (
+      <div className="fixed inset-0 z-50 bg-background flex items-center justify-center p-4">
+        <div className="max-w-md w-full bg-card border border-border rounded-2xl p-8 text-center space-y-4 shadow-xl">
+          <div className="w-20 h-20 mx-auto rounded-full bg-muted flex items-center justify-center">
+            <CheckCircle2 className="w-10 h-10 text-muted-foreground" />
+          </div>
+          <h1 className="text-2xl font-bold text-foreground">Test Already Submitted</h1>
+          <p className="text-muted-foreground text-sm leading-relaxed">
+            You have already completed this test. Retakes are only allowed with instructor approval.
+          </p>
+          <button
+            onClick={() => navigate("/student/dashboard")}
+            className="w-full py-3 bg-primary text-primary-foreground font-bold rounded-xl hover:opacity-90 transition-opacity"
+          >
+            Back to Dashboard
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   // Blocked: previous attempt was flagged and admin hasn't granted retake yet
   if (isFlaggedBlocked) {
@@ -174,7 +249,42 @@ export function TakeTestPage() {
 
   if (!test) return null;
 
-  const questions: any[] = test.test_questions || [];
+  // ── Ready to Begin screen (shown before student enters fullscreen) ─────────
+  if (!testStarted) {
+    return (
+      <div className="fixed inset-0 z-50 bg-background flex items-center justify-center p-4">
+        <div className="max-w-md w-full bg-card border rounded-2xl p-8 text-center space-y-6 shadow-xl">
+          <div
+            className="w-16 h-16 mx-auto rounded-xl flex items-center justify-center"
+            style={{ background: "var(--gold)" }}
+          >
+            <Maximize2 className="w-8 h-8 text-[#1A1A1A]" />
+          </div>
+          <div>
+            <h1 className="text-2xl font-bold mb-2">{test.title}</h1>
+            <p className="text-sm text-muted-foreground">
+              {test.duration_mins || 30} minutes · {questions.length} questions
+            </p>
+          </div>
+          <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/20 text-left space-y-2">
+            <p className="text-sm font-bold text-amber-700 dark:text-amber-400">Before you begin:</p>
+            <ul className="text-xs text-amber-700 dark:text-amber-400 space-y-1 list-disc list-inside leading-relaxed">
+              <li>The exam will open in fullscreen mode.</li>
+              <li>Switching tabs or exiting fullscreen triggers a warning.</li>
+              <li>A second violation auto-submits your test.</li>
+              <li>You cannot retake the test once submitted.</li>
+            </ul>
+          </div>
+          <button
+            onClick={handleBeginTest}
+            className="w-full py-4 bg-primary text-primary-foreground font-bold text-lg rounded-xl hover:opacity-90 transition-opacity"
+          >
+            Begin Exam
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   const handleAnswer = (val: string) => {
     const q = questions[currentQIndex];
@@ -401,9 +511,9 @@ export function TakeTestPage() {
               <AlertTriangle className="w-8 h-8 text-red-500" />
             </div>
             <h2 className="text-xl font-black text-red-500 uppercase tracking-wide">⚠ Warning</h2>
-            <p className="font-semibold text-foreground">Tab switch detected!</p>
+            <p className="font-semibold text-foreground">Security violation detected!</p>
             <p className="text-sm text-muted-foreground leading-relaxed">
-              This is your <strong>first and only warning</strong>. If you switch tabs or open another application again, your test will be <strong className="text-red-500">automatically submitted and terminated</strong>. You will not be able to retake it without instructor approval.
+              This is your <strong>first and only warning</strong>. Switching tabs, exiting fullscreen, or opening another application will <strong className="text-red-500">automatically submit and terminate</strong> your test. You cannot retake it without instructor approval.
             </p>
             <button
               onClick={() => setShowTabWarning(false)}
