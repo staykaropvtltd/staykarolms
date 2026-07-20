@@ -40,7 +40,7 @@ router.get("/unbatched", authenticate, requireRole("admin", "super-admin"), asyn
     const [{ data: allStudents, error }, { data: batchedData }] = await Promise.all([
       supabase
         .from("profiles")
-        .select("id, name, email, avatar_url, created_at, status")
+        .select("id, name, email, avatar_url, created_at")
         .eq("role", "student")
         .eq("institution_id", req.user.institution_id)
         .order("name", { ascending: true }),
