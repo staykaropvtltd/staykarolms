@@ -57,7 +57,32 @@ router.delete("/bulk", authenticate, requireRole("admin", "super-admin"), async 
   }
 });
 
-// GET /api/users/unbatched — students in this institution not in any batch (no status col)
+// DELETE /api/users/unbatched — legacy: deletes up to 100 unbatched students per call.
+// New clients should use DELETE /api/users/bulk with explicit IDs instead.
+router.delete("/unbatched", authenticate, requireRole("admin", "super-admin"), async (req, res, next) => {
+  try {
+    const [{ data: allStudents, error }, { data: batchedData }] = await Promise.all([
+      supabase.from("profiles").select("id").eq("role", "student").eq("institution_id", req.user.institution_id),
+      supabase.from("batch_students").select("student_id, batches:batch_id(institution_id)"),
+    ]);
+    if (error) return res.status(400).json({ error: error.message });
+    const batchedIds = new Set(
+      (batchedData || []).filter(r => r.batches?.institution_id === req.user.institution_id).map(r => r.student_id)
+    );
+    const ids = (allStudents || []).filter(s => !batchedIds.has(s.id)).slice(0, 100).map(s => s.id);
+    let deleted = 0;
+    for (let i = 0; i < ids.length; i += 10) {
+      const chunk = ids.slice(i, i + 10);
+      const results = await Promise.allSettled(chunk.map(id => supabase.auth.admin.deleteUser(id)));
+      deleted += results.filter(r => r.status === "fulfilled").length;
+    }
+    return res.json({ data: { deleted } });
+  } catch (err) {
+    return next(err);
+  }
+});
+
+// GET /api/users/unbatched — students in this institution not in any batch
 router.get("/unbatched", authenticate, requireRole("admin", "super-admin"), async (req, res, next) => {
   try {
     const [{ data: allStudents, error }, { data: batchedData }] = await Promise.all([
