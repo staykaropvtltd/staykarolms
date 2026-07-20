@@ -622,14 +622,14 @@ export const removeStudentFromBatch = (batchId: string, studentId: string) =>
 export const removeAllStudentsFromBatch = (batchId: string) =>
   apiFetch(`/api/batches/${batchId}/students`, { method: "DELETE" });
 
-export const deleteBatchStudentAccounts = (batchId: string) =>
-  apiFetch(`/api/batches/${batchId}/students/delete-accounts`, { method: "DELETE" });
-
 export const getUnbatchedStudents = () =>
   apiFetch("/api/users/unbatched");
 
-export const deleteUnbatchedStudents = () =>
-  apiFetch("/api/users/unbatched", { method: "DELETE" });
+export const bulkDeleteUsers = (ids: string[]) =>
+  apiFetch("/api/users/bulk", {
+    method: "DELETE",
+    body: JSON.stringify({ ids }),
+  });
 
 export const bulkAddStudentsToBatch = (batchId: string, emails: string[]) =>
   apiFetch(`/api/batches/${batchId}/students/bulk`, {

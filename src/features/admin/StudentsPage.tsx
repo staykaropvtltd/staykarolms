@@ -11,7 +11,7 @@ import { StatCard } from "@/shared/components/StatCard";
 import { Button } from "@/shared/components/ui/button";
 import {
   getUsers, getUser, createUser, updateUser, deleteUser, getBatches, importNominalRoll,
-  getUnbatchedStudents, deleteUnbatchedStudents,
+  getUnbatchedStudents, bulkDeleteUsers,
 } from "@/shared/lib/api";
 import { toast } from "sonner";
 
@@ -914,6 +914,7 @@ export function StudentsPage({ userType }: StudentsPageProps) {
   const [unbatchedOnly, setUnbatchedOnly] = useState(false);
   const [showDeleteUnbatched, setShowDeleteUnbatched] = useState(false);
   const [deletingUnbatched, setDeletingUnbatched] = useState(false);
+  const [deleteUnbatchedProgress, setDeleteUnbatchedProgress] = useState({ done: 0, total: 0 });
 
   const fetchStudents = async () => {
     setLoading(true);
@@ -929,11 +930,21 @@ export function StudentsPage({ userType }: StudentsPageProps) {
   useEffect(() => { fetchStudents(); }, [unbatchedOnly]);
 
   const handleDeleteUnbatched = async () => {
+    const ids = students.map(s => s.id);
+    if (ids.length === 0) return;
     setDeletingUnbatched(true);
-    const { data, error } = await deleteUnbatchedStudents();
+    setDeleteUnbatchedProgress({ done: 0, total: ids.length });
+    const CHUNK = 50;
+    let totalDeleted = 0;
+    for (let i = 0; i < ids.length; i += CHUNK) {
+      const chunk = ids.slice(i, i + CHUNK);
+      const { data, error } = await bulkDeleteUsers(chunk);
+      if (error) { toast.error(error); break; }
+      totalDeleted += (data as any)?.deleted ?? 0;
+      setDeleteUnbatchedProgress({ done: Math.min(i + CHUNK, ids.length), total: ids.length });
+    }
     setDeletingUnbatched(false);
-    if (error) { toast.error(error); return; }
-    toast.success(`${(data as any)?.deleted ?? 0} student accounts permanently deleted`);
+    toast.success(`${totalDeleted} student accounts permanently deleted`);
     setShowDeleteUnbatched(false);
     fetchStudents();
   };
@@ -988,6 +999,17 @@ export function StudentsPage({ userType }: StudentsPageProps) {
                 <p className="text-xs text-muted-foreground mt-1">This may take up to a minute for {students.length} students.</p>
               )}
             </div>
+            {deletingUnbatched && (
+              <div className="mb-4 space-y-1.5">
+                <div className="w-full h-2 bg-muted rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-red-500 rounded-full transition-all duration-300"
+                    style={{ width: `${deleteUnbatchedProgress.total > 0 ? Math.round((deleteUnbatchedProgress.done / deleteUnbatchedProgress.total) * 100) : 0}%` }}
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground text-center">{deleteUnbatchedProgress.done} / {deleteUnbatchedProgress.total} deleted</p>
+              </div>
+            )}
             <div className="flex gap-2">
               <Button variant="outline" className="flex-1" onClick={() => setShowDeleteUnbatched(false)} disabled={deletingUnbatched}>Cancel</Button>
               <Button className="flex-1 bg-red-600 hover:bg-red-700 text-white" onClick={handleDeleteUnbatched} disabled={deletingUnbatched}>

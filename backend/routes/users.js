@@ -34,6 +34,29 @@ router.get("/", authenticate, async (req, res, next) => {
   }
 });
 
+// DELETE /api/users/bulk — hard-delete up to 50 user accounts by ID (frontend paginates for large sets)
+router.delete("/bulk", authenticate, requireRole("admin", "super-admin"), async (req, res, next) => {
+  const { ids } = req.body;
+  if (!Array.isArray(ids) || ids.length === 0)
+    return res.status(400).json({ error: "ids array is required" });
+  if (ids.length > 50)
+    return res.status(400).json({ error: "Maximum 50 IDs per request" });
+
+  try {
+    let deleted = 0;
+    for (let i = 0; i < ids.length; i += 10) {
+      const chunk = ids.slice(i, i + 10);
+      const results = await Promise.allSettled(
+        chunk.map(id => supabase.auth.admin.deleteUser(id))
+      );
+      deleted += results.filter(r => r.status === "fulfilled").length;
+    }
+    return res.json({ data: { deleted } });
+  } catch (err) {
+    return next(err);
+  }
+});
+
 // GET /api/users/unbatched — students in this institution not assigned to any batch
 router.get("/unbatched", authenticate, requireRole("admin", "super-admin"), async (req, res, next) => {
   try {
@@ -63,43 +86,6 @@ router.get("/unbatched", authenticate, requireRole("admin", "super-admin"), asyn
   }
 });
 
-// DELETE /api/users/unbatched — permanently delete all students not in any batch
-router.delete("/unbatched", authenticate, requireRole("admin", "super-admin"), async (req, res, next) => {
-  try {
-    const [{ data: allStudents, error }, { data: batchedData }] = await Promise.all([
-      supabase
-        .from("profiles")
-        .select("id")
-        .eq("role", "student")
-        .eq("institution_id", req.user.institution_id),
-      supabase
-        .from("batch_students")
-        .select("student_id, batches:batch_id(institution_id)"),
-    ]);
-
-    if (error) return res.status(400).json({ error: error.message });
-
-    const batchedIds = new Set(
-      (batchedData || [])
-        .filter(r => r.batches?.institution_id === req.user.institution_id)
-        .map(r => r.student_id)
-    );
-
-    const ids = (allStudents || []).filter(s => !batchedIds.has(s.id)).map(s => s.id);
-    if (ids.length === 0) return res.json({ data: { deleted: 0 } });
-
-    let deleted = 0;
-    for (let i = 0; i < ids.length; i += 10) {
-      const chunk = ids.slice(i, i + 10);
-      const results = await Promise.allSettled(chunk.map(id => supabase.auth.admin.deleteUser(id)));
-      deleted += results.filter(r => r.status === "fulfilled").length;
-    }
-
-    return res.json({ data: { deleted } });
-  } catch (err) {
-    return next(err);
-  }
-});
 
 // GET /api/users/:id — single user profile with batch memberships
 router.get("/:id", authenticate, requireRole("admin", "faculty", "super-admin"), async (req, res, next) => {

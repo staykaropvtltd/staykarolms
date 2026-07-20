@@ -10,7 +10,7 @@ import { Button } from "@/shared/components/ui/button";
 import { Switch } from "@/shared/components/ui/switch";
 import {
   getBatches, createBatch, getBatch, updateBatch,
-  addStudentToBatch, removeStudentFromBatch, removeAllStudentsFromBatch, deleteBatchStudentAccounts, bulkAddStudentsToBatch,
+  addStudentToBatch, removeStudentFromBatch, removeAllStudentsFromBatch, bulkDeleteUsers, bulkAddStudentsToBatch,
   getBatchCourses, assignCourseToBatch, removeCourseFromBatch,
   getUsers, getCourses, deleteUser,
 } from "@/shared/lib/api";
@@ -487,6 +487,7 @@ function BatchDetailModal({
   const [removingAll, setRemovingAll] = useState(false);
   const [showDeleteAllAccounts, setShowDeleteAllAccounts] = useState(false);
   const [deletingAllAccounts, setDeletingAllAccounts] = useState(false);
+  const [deleteAllProgress, setDeleteAllProgress] = useState({ done: 0, total: 0 });
   const [confirmDeleteUser, setConfirmDeleteUser] = useState<BatchStudent | null>(null);
   const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
 
@@ -545,11 +546,21 @@ function BatchDetailModal({
   };
 
   const handleDeleteAllAccounts = async () => {
+    const ids = students.map(s => s.id);
+    if (ids.length === 0) return;
     setDeletingAllAccounts(true);
-    const { data, error } = await deleteBatchStudentAccounts(batchId);
+    setDeleteAllProgress({ done: 0, total: ids.length });
+    const CHUNK = 50;
+    let totalDeleted = 0;
+    for (let i = 0; i < ids.length; i += CHUNK) {
+      const chunk = ids.slice(i, i + CHUNK);
+      const { data, error } = await bulkDeleteUsers(chunk);
+      if (error) { toast.error(error); break; }
+      totalDeleted += (data as any)?.deleted ?? 0;
+      setDeleteAllProgress({ done: Math.min(i + CHUNK, ids.length), total: ids.length });
+    }
     setDeletingAllAccounts(false);
-    if (error) { toast.error(error); return; }
-    toast.success(`${(data as any)?.deleted ?? 0} student accounts permanently deleted`);
+    toast.success(`${totalDeleted} student accounts permanently deleted`);
     setShowDeleteAllAccounts(false);
     fetchBatch();
   };
@@ -879,6 +890,17 @@ function BatchDetailModal({
                 <p className="text-xs text-muted-foreground mt-1">This may take up to a minute for {students.length} students.</p>
               )}
             </div>
+            {deletingAllAccounts && (
+              <div className="mb-4 space-y-1.5">
+                <div className="w-full h-2 bg-muted rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-red-500 rounded-full transition-all duration-300"
+                    style={{ width: `${deleteAllProgress.total > 0 ? Math.round((deleteAllProgress.done / deleteAllProgress.total) * 100) : 0}%` }}
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground text-center">{deleteAllProgress.done} / {deleteAllProgress.total} deleted</p>
+              </div>
+            )}
             <div className="flex gap-2">
               <Button variant="outline" className="flex-1" onClick={() => setShowDeleteAllAccounts(false)} disabled={deletingAllAccounts}>Cancel</Button>
               <Button className="flex-1 bg-red-600 hover:bg-red-700 text-white" onClick={handleDeleteAllAccounts} disabled={deletingAllAccounts}>
