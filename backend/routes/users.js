@@ -57,7 +57,7 @@ router.delete("/bulk", authenticate, requireRole("admin", "super-admin"), async 
   }
 });
 
-// GET /api/users/unbatched — students in this institution not assigned to any batch
+// GET /api/users/unbatched — students in this institution not in any batch (no status col)
 router.get("/unbatched", authenticate, requireRole("admin", "super-admin"), async (req, res, next) => {
   try {
     const [{ data: allStudents, error }, { data: batchedData }] = await Promise.all([
