@@ -613,8 +613,8 @@ function BatchDetailModal({
           </div>
 
           {/* Tabs */}
-          <div className="flex items-center justify-between px-6 py-3 border-b border-border bg-muted/20 shrink-0">
-            <div className="flex gap-1 bg-muted/40 p-1 rounded-lg">
+          <div className="px-6 pt-3 border-b border-border bg-muted/20 shrink-0">
+            <div className="flex gap-1 bg-muted/40 p-1 rounded-lg w-fit">
               <button
                 onClick={() => setActiveTab("students")}
                 className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center gap-1.5 ${activeTab === "students" ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
@@ -634,13 +634,16 @@ function BatchDetailModal({
                 <ShieldCheck className="w-3.5 h-3.5" /> Student Access
               </button>
             </div>
+          </div>
 
-            <div className="flex items-center gap-2">
+          {/* Tab action bar */}
+          {(activeTab === "students" || activeTab === "courses") && (
+            <div className="flex items-center justify-end gap-2 px-6 py-2 border-b border-border shrink-0">
               {activeTab === "students" && (
                 <>
                   {students.length > 0 && (
-                    <Button size="sm" variant="outline" className="text-red-500 hover:text-red-600 hover:border-red-300 px-2" onClick={() => setShowRemoveAll(true)} title="Remove all students">
-                      <Trash2 className="w-3.5 h-3.5" />
+                    <Button size="sm" variant="outline" className="gap-1.5 text-red-500 hover:text-red-600 hover:border-red-300" onClick={() => setShowRemoveAll(true)}>
+                      <Trash2 className="w-3.5 h-3.5" /> Remove All
                     </Button>
                   )}
                   <Button size="sm" variant="outline" className="gap-1.5" onClick={() => setShowCSV(true)}>
@@ -655,7 +658,7 @@ function BatchDetailModal({
                 <AssignCourseDropdown batchId={batchId} assignedCourseIds={assignedCourseIds} onAssigned={fetchCourses} />
               )}
             </div>
-          </div>
+          )}
 
           {/* Content */}
           <div className="flex-1 overflow-y-auto p-6">
