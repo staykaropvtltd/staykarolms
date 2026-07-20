@@ -97,7 +97,7 @@ const SUBTITLES: Record<UserType, string> = {
   "super-admin": "StayKaro Team",
   admin:         "Institution Admin",
   faculty:       "Faculty Member",
-  student:       "🔥 12-day streak · Lvl 12",
+  student:       "Student",
 };
 
 export function Sidebar({ userType, onClose }: SidebarProps) {
