@@ -25,7 +25,7 @@ router.get("/student", authenticate, requireRole("student"), async (req, res, ne
     ] = await Promise.all([
       supabase.from("enrollments").select("*, courses:course_id(title)").eq("student_id", studentId),
       supabase.from("assignment_submissions").select("grade, assignment_id").eq("student_id", studentId),
-      supabase.from("test_attempts").select("score, status, test_id, tests:test_id(title,type)").eq("student_id", studentId),
+      supabase.from("test_attempts").select("score, status, test_id, created_at, tests:test_id(title,type)").eq("student_id", studentId),
       supabase.from("attendance").select("status").eq("student_id", studentId),
       supabase.from("ai_sessions").select("score, created_at").eq("student_id", studentId),
     ]);
@@ -37,12 +37,34 @@ router.get("/student", authenticate, requireRole("student"), async (req, res, ne
       : 0;
     const completedTests = (attempts || []).filter((a) => a.status === "submitted").length;
 
+    // Calculate login streak from activity dates (ai_sessions + test_attempts)
+    const activityDates = new Set();
+    (aiSessions || []).forEach((s) => {
+      if (s.created_at) activityDates.add(new Date(s.created_at).toISOString().split("T")[0]);
+    });
+    (attempts || []).forEach((a) => {
+      if (a.created_at) activityDates.add(new Date(a.created_at).toISOString().split("T")[0]);
+    });
+
+    let streak = 0;
+    const checkDate = new Date();
+    checkDate.setUTCHours(0, 0, 0, 0);
+    // If no activity today, start counting from yesterday
+    if (!activityDates.has(checkDate.toISOString().split("T")[0])) {
+      checkDate.setUTCDate(checkDate.getUTCDate() - 1);
+    }
+    while (activityDates.has(checkDate.toISOString().split("T")[0])) {
+      streak++;
+      checkDate.setUTCDate(checkDate.getUTCDate() - 1);
+    }
+
     const data = {
       enrolledCourses: enrollments?.length || 0,
       attendancePercent: totalDays ? Math.round((presentDays / totalDays) * 100) : 0,
       avgAssignmentGrade: avgGrade,
       completedTests,
       aiSessionCount: aiSessions?.length || 0,
+      streak,
       recentAttempts: attempts?.slice(0, 5) || [],
       enrollments: enrollments || [],
     };

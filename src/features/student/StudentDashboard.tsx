@@ -384,7 +384,7 @@ export function StudentDashboard() {
   const xpCurrent = enrolledCoursesCount * 100 + completedTestsCount * 50;
   const xpLevel = Math.floor(xpCurrent / 2000) + 1;
   const xpNextLevel = xpLevel * 2000;
-  const streak = 0;
+  const streak = stats?.streak || 0;
 
   const badges = [
     { id: "1", title: "Early Bird", icon: "🌅", xp: 50, earned: false },
