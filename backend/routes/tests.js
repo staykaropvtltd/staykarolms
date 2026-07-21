@@ -1048,13 +1048,17 @@ router.delete(
 
       const attemptIds = (attempts || []).map((a) => a.id);
 
-      // 2. Delete test_answers (child of test_attempts)
+      // 2. Delete test_answers (child of test_attempts) in chunks to avoid PostgREST URL length limits
       if (attemptIds.length > 0) {
-        const { error: ansErr } = await supabase
-          .from("test_answers")
-          .delete()
-          .in("attempt_id", attemptIds);
-        if (ansErr) return res.status(500).json({ error: "Failed to delete answers: " + ansErr.message });
+        const CHUNK = 100;
+        for (let i = 0; i < attemptIds.length; i += CHUNK) {
+          const chunk = attemptIds.slice(i, i + CHUNK);
+          const { error: ansErr } = await supabase
+            .from("test_answers")
+            .delete()
+            .in("attempt_id", chunk);
+          if (ansErr) return res.status(500).json({ error: "Failed to delete answers: " + ansErr.message });
+        }
       }
 
       // 3. Delete test_attempts

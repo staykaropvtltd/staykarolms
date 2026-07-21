@@ -1,11 +1,11 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router";
-import { BookOpen, Plus, Search, Users, X, Loader2, AlertCircle } from "lucide-react";
+import { BookOpen, Plus, Search, Users, X, Loader2, AlertCircle, Trash2 } from "lucide-react";
 import type { UserType } from "@/shared/userTypes";
 import { PageHeader } from "@/shared/components/PageHeader";
 import { StatCard } from "@/shared/components/StatCard";
 import { Button } from "@/shared/components/ui/button";
-import { getCourses, createCourse } from "@/shared/lib/api";
+import { getCourses, createCourse, deleteCourse } from "@/shared/lib/api";
 import { toast } from "sonner";
 
 interface CoursesPageProps {
@@ -109,6 +109,7 @@ export function CoursesPage({ userType }: CoursesPageProps) {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
   const [showModal, setShowModal] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const fetchCourses = async () => {
     setLoading(true);
@@ -125,6 +126,19 @@ export function CoursesPage({ userType }: CoursesPageProps) {
       setCourses(normalized);
     }
     setLoading(false);
+  };
+
+  const handleDelete = async (id: string, title: string) => {
+    if (!window.confirm(`Delete "${title}"? This will remove all course content and enrollments.`)) return;
+    setDeletingId(id);
+    const { error } = await deleteCourse(id);
+    setDeletingId(null);
+    if (error) {
+      toast.error(error);
+    } else {
+      toast.success("Course deleted");
+      fetchCourses();
+    }
   };
 
   useEffect(() => { fetchCourses(); }, []);
@@ -235,9 +249,23 @@ export function CoursesPage({ userType }: CoursesPageProps) {
                       </span>
                     </td>
                     <td className="py-3 px-6 text-right">
-                      <Button variant="ghost" size="sm" onClick={() => navigate(`/${isAdmin ? 'admin' : 'faculty'}/course-content?courseId=${c.id}`)}>
-                        {isAdmin ? "Manage" : "Open"}
-                      </Button>
+                      <div className="flex items-center justify-end gap-1">
+                        <Button variant="ghost" size="sm" onClick={() => navigate(`/${isAdmin ? 'admin' : 'faculty'}/course-content?courseId=${c.id}`)}>
+                          {isAdmin ? "Manage" : "Open"}
+                        </Button>
+                        {isAdmin && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            disabled={deletingId === c.id}
+                            onClick={() => handleDelete(c.id, c.title)}
+                          >
+                            {deletingId === c.id
+                              ? <Loader2 className="w-3.5 h-3.5 animate-spin text-red-500" />
+                              : <Trash2 className="w-3.5 h-3.5 text-muted-foreground hover:text-red-500" />}
+                          </Button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))
