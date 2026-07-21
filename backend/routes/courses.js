@@ -177,6 +177,7 @@ router.delete(
       await supabase.from("course_content").delete().eq("course_id", courseId);
       await supabase.from("course_modules").delete().eq("course_id", courseId);
       await supabase.from("certificates").delete().eq("course_id", courseId);
+      await supabase.from("calendar_events").delete().eq("course_id", courseId);
       await supabase.from("live_classes").delete().eq("course_id", courseId);
       await supabase.from("attendance").delete().eq("course_id", courseId);
       await supabase.from("assignments").delete().eq("course_id", courseId);
