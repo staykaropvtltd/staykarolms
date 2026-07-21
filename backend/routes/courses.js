@@ -159,12 +159,32 @@ router.delete(
   requireRole("admin", "super-admin"),
   async (req, res, next) => {
     try {
-      let query = supabase.from("courses").delete().eq("id", req.params.id);
+      const courseId = req.params.id;
+
+      // Verify the course belongs to this institution (non-super-admin)
       if (req.user.role !== "super-admin") {
-        query = query.eq("institution_id", req.user.institution_id);
+        const { data: course } = await supabase
+          .from("courses")
+          .select("id")
+          .eq("id", courseId)
+          .eq("institution_id", req.user.institution_id)
+          .single();
+        if (!course) return res.status(404).json({ error: "Course not found" });
       }
-      const { error } = await query;
+
+      // Delete all child records in dependency order before removing the course
+      await supabase.from("lesson_completions").delete().eq("course_id", courseId);
+      await supabase.from("course_content").delete().eq("course_id", courseId);
+      await supabase.from("course_modules").delete().eq("course_id", courseId);
+      await supabase.from("certificates").delete().eq("course_id", courseId);
+      await supabase.from("live_classes").delete().eq("course_id", courseId);
+      await supabase.from("attendance").delete().eq("course_id", courseId);
+      await supabase.from("assignments").delete().eq("course_id", courseId);
+      await supabase.from("enrollments").delete().eq("course_id", courseId);
+
+      const { error } = await supabase.from("courses").delete().eq("id", courseId);
       if (error) return res.status(400).json({ error: error.message });
+
       return res.json({ data: { message: "Course deleted" } });
     } catch (err) {
       return next(err);
