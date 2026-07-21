@@ -84,7 +84,7 @@ export function ProgressPage() {
 
   const enrolledCount = enrolledCourses.length;
 
-  const xpCurrent = enrolledCount * 1000 + completedTests * 200;
+  const xpCurrent = enrolledCount * 100 + completedTests * 50;
   const xpLevel = Math.floor(xpCurrent / 2000) + 1;
   const xpNextLevel = xpLevel * 2000;
   const xpPct = Math.round((xpCurrent / xpNextLevel) * 100);

@@ -381,7 +381,7 @@ export function StudentDashboard() {
   const enrolledCoursesCount = stats?.enrolledCourses || 0;
   const completedTestsCount = stats?.completedTests || 0;
   
-  const xpCurrent = enrolledCoursesCount * 1000 + completedTestsCount * 200;
+  const xpCurrent = enrolledCoursesCount * 100 + completedTestsCount * 50;
   const xpLevel = Math.floor(xpCurrent / 2000) + 1;
   const xpNextLevel = xpLevel * 2000;
   const streak = 0;
