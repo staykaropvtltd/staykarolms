@@ -214,8 +214,9 @@ function LeaderboardCard({ currentXP, level }: { currentXP: number; level: numbe
 function DeadlinesPanel({ assignments }: { assignments: any[] }) {
   const navigate = useNavigate();
 
+  const now = new Date();
   const items = assignments
-    .filter(a => a.due_date)
+    .filter(a => a.due_date && new Date(a.due_date) > now)
     .sort((a, b) => new Date(a.due_date).getTime() - new Date(b.due_date).getTime())
     .slice(0, 4)
     .map(a => ({
