@@ -275,15 +275,17 @@ function doExportPDF(rows: AttemptRow[], ctx: ExportCtx) {
   <tbody>${trs}</tbody>
 </table>
 <div class="footer">StayKaro LMS &nbsp;·&nbsp; ${escHtml(ctx.institutionName)} &nbsp;·&nbsp; ${ranked.length} students</div>
-<button onclick="window.print()" style="margin-top:12px;padding:6px 16px;background:#C9A84C;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:11px">Print / Save as PDF</button>
-<script>window.onload=()=>window.print();</script>
+<div id="printbar" style="margin-top:14px;padding:10px 14px;background:#F5F0E8;border-radius:8px;display:flex;align-items:center;gap:12px">
+  <span style="font-size:11px;color:#555;flex:1">Your results are ready. Click the button to save as PDF.</span>
+  <button onclick="window.print()" style="padding:7px 20px;background:#C9A84C;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-weight:700">🖨 Save as PDF</button>
+</div>
 </body></html>`;
 
   const win = window.open("", "_blank", "width=1200,height=800");
   if (!win) { toast.error("Allow pop-ups to use PDF export"); return; }
   win.document.write(html);
   win.document.close();
-  toast.success("PDF ready — use Print → Save as PDF");
+  toast.success("PDF page opened — click 'Save as PDF' button in the new tab");
 }
 
 function doPrint(rows: AttemptRow[], ctx: ExportCtx) {

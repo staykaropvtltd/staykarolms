@@ -61,6 +61,7 @@ const facultyMenu: MenuItem[] = [
   { path: "student-performance", label: "Student Performance", icon: TrendingUp },
   { path: "assignment-review",   label: "Assignment Reviews",  icon: ClipboardCheck },
   { path: "tests",               label: "Tests",               icon: ClipboardList },
+  { path: "attendance",          label: "Attendance",          icon: UserCheck },
   { path: "live-classes",        label: "Live Classes",        icon: Video },
   { path: "analytics",           label: "Analytics",           icon: BarChart3 },
   { path: "calendar",            label: "Schedule",            icon: Calendar },

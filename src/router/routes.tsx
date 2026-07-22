@@ -152,6 +152,7 @@ export const router = createBrowserRouter([
           { path: "assignment-review",    element: <AssignmentReviewPage /> },
           { path: "course-content",       element: <CourseContentPage /> },
           { path: "tests",                element: <TestManagementPage userType="faculty" /> },
+          { path: "attendance",           element: <AttendancePage /> },
           { path: "live-classes",         element: <LiveClassesPage /> },
           { path: "analytics",            element: <FacultyAnalyticsPage /> },
           { path: "calendar",             element: <CalendarPage /> },
