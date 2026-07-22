@@ -79,6 +79,7 @@ const studentMenu: MenuItem[] = [
   { path: "code-editor",    label: "Coding Practice", icon: Code2 },
   { path: "coding-test",    label: "Coding Test",     icon: Code2 },
   { path: "aptitude-test",  label: "Aptitude Test",   icon: Brain },
+  { path: "attendance",     label: "Attendance",      icon: UserCheck },
   { path: "ai-interviewer", label: "AI Interview Prep",icon: Mic },
   { path: "certificates",   label: "Certificates",    icon: Award },
   { path: "calendar",       label: "Calendar",        icon: Calendar },

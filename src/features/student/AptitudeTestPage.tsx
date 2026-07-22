@@ -45,10 +45,10 @@ export function AptitudeTestPage({ userType: _userType }: { userType: string }) 
               key={test.id}
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
-              className="bg-card border rounded-2xl p-6 hover:shadow-lg transition-all"
+              className="bg-card border rounded-2xl p-6 hover:shadow-lg transition-all flex flex-col"
             >
               <h3 className="text-xl font-bold mb-2">{test.title}</h3>
-              <div className="flex items-center gap-4 text-sm text-muted-foreground mb-6">
+              <div className="flex items-center gap-4 text-sm text-muted-foreground flex-1">
                 <div className="flex items-center gap-1">
                   <Clock className="w-4 h-4" />
                   {test.duration_mins} mins
@@ -58,7 +58,7 @@ export function AptitudeTestPage({ userType: _userType }: { userType: string }) 
                   {test.test_questions?.[0]?.count ?? 0} Questions
                 </div>
               </div>
-              <Button onClick={() => navigate(`/student/take-test/${test.id}`)} className="w-full">
+              <Button onClick={() => navigate(`/student/take-test/${test.id}`)} className="w-full mt-4">
                 <Play className="w-4 h-4 mr-2" /> Start Test
               </Button>
             </motion.div>

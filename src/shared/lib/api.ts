@@ -487,6 +487,22 @@ export const getStudentAttendance = (studentId: string) =>
 export const getCourseAttendance = (courseId: string) =>
   apiFetch(`/api/attendance/course/${courseId}`);
 
+// Live attendance sessions
+export const startAttendanceSession = (payload: { batch_id: string; course_id: string; duration_mins: number; date?: string }) =>
+  apiFetch("/api/attendance/sessions", { method: "POST", body: JSON.stringify(payload) });
+
+export const getAttendanceSessions = () =>
+  apiFetch("/api/attendance/sessions");
+
+export const getActiveAttendanceSession = () =>
+  apiFetch("/api/attendance/sessions/active");
+
+export const getAttendanceSessionResults = (sessionId: string) =>
+  apiFetch(`/api/attendance/sessions/${sessionId}/results`);
+
+export const selfMarkAttendance = (sessionId: string) =>
+  apiFetch(`/api/attendance/sessions/${sessionId}/mark`, { method: "POST" });
+
 // ── Notifications ─────────────────────────────────────────────────────────────
 
 export const getNotifications = () => apiFetch("/api/notifications");

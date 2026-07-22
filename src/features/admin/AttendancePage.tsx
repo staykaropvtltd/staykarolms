@@ -1,10 +1,10 @@
-import { useState, useEffect } from "react";
-import { Users, CheckCircle, XCircle, Clock, Download, Loader2, Layers } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import { Users, CheckCircle, XCircle, Clock, Download, Loader2, Layers, Radio, RefreshCw } from "lucide-react";
 import { PageHeader } from "@/shared/components/PageHeader";
 import { StatCard } from "@/shared/components/StatCard";
 import { Button } from "@/shared/components/ui/button";
 import { toast } from "sonner";
-import { getCourses, getCourseAttendance, markAttendance, getBatches, getBatch } from "@/shared/lib/api";
+import { getCourses, getCourseAttendance, markAttendance, getBatches, getBatch, startAttendanceSession, getAttendanceSessions, getAttendanceSessionResults } from "@/shared/lib/api";
 
 type AttendanceStatus = "Present" | "Absent" | "Late";
 
@@ -58,7 +58,7 @@ function exportAttendanceCSV(records: StudentAttendance[], dates: string[], cour
 }
 
 export function AttendancePage() {
-  const [mode, setMode] = useState<"course" | "batch">("course");
+  const [mode, setMode] = useState<"course" | "batch" | "live">("course");
 
   // ── Course mode ──────────────────────────────────────────────────────────────
   const [courses, setCourses] = useState<any[]>([]);
@@ -76,6 +76,67 @@ export function AttendancePage() {
   const [batchCourseId, setBatchCourseId] = useState<string | null>(null);
   const [batchLoading, setBatchLoading] = useState(false);
   const [batchSaving, setBatchSaving] = useState(false);
+
+  // ── Live Session mode ─────────────────────────────────────────────────────
+  const [liveBatchId, setLiveBatchId] = useState<string | null>(null);
+  const [liveCourseId, setLiveCourseId] = useState<string | null>(null);
+  const [liveDuration, setLiveDuration] = useState(10);
+  const [liveStarting, setLiveStarting] = useState(false);
+  const [activeSession, setActiveSession] = useState<any | null>(null);
+  const [sessionResults, setSessionResults] = useState<{ session: any; responses: any[] } | null>(null);
+  const [pastSessions, setPastSessions] = useState<any[]>([]);
+  const [sessionResultsLoading, setSessionResultsLoading] = useState(false);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    if (mode !== "live") return;
+    getAttendanceSessions().then(({ data }) => setPastSessions((data as any[]) || []));
+  }, [mode]);
+
+  const startLiveSession = async () => {
+    if (!liveBatchId) { toast.error("Please select a batch"); return; }
+    if (!liveCourseId) { toast.error("Please select a course"); return; }
+    setLiveStarting(true);
+    const { data, error } = await startAttendanceSession({ batch_id: liveBatchId, course_id: liveCourseId, duration_mins: liveDuration });
+    setLiveStarting(false);
+    if (error) { toast.error(error); return; }
+    toast.success(`Attendance session started! Students have ${liveDuration} min to mark.`);
+    setActiveSession(data);
+    loadSessionResults((data as any).id);
+    // Poll every 5s
+    pollRef.current = setInterval(() => loadSessionResults((data as any).id), 5000);
+  };
+
+  const loadSessionResults = async (sessionId: string) => {
+    setSessionResultsLoading(true);
+    const { data } = await getAttendanceSessionResults(sessionId);
+    setSessionResultsLoading(false);
+    if (data) setSessionResults(data as any);
+  };
+
+  // Clean up polling on unmount or mode switch
+  useEffect(() => {
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+  }, []);
+
+  useEffect(() => {
+    if (mode !== "live" && pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+  }, [mode]);
+
+  const timeRemaining = activeSession
+    ? Math.max(0, Math.floor((new Date(activeSession.expires_at).getTime() - Date.now()) / 1000))
+    : 0;
+
+  useEffect(() => {
+    if (!activeSession) return;
+    if (timeRemaining <= 0 && pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+  }, [timeRemaining, activeSession]);
 
   useEffect(() => {
     async function init() {
@@ -228,13 +289,14 @@ export function AttendancePage() {
 
       {/* Mode toggle */}
       <div className="flex gap-1 bg-muted/40 p-1 rounded-lg w-fit mb-6">
-        {(["course", "batch"] as const).map(m => (
+        {([["course", "By Course"], ["batch", "By Batch"], ["live", "Live Session"]] as const).map(([m, label]) => (
           <button
             key={m}
             onClick={() => setMode(m)}
-            className={`px-4 py-1.5 rounded-md text-sm font-medium capitalize transition-colors ${mode === m ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+            className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center gap-1.5 ${mode === m ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
           >
-            {m === "course" ? "By Course" : "By Batch"}
+            {m === "live" && <Radio className="w-3.5 h-3.5 text-red-500" />}
+            {label}
           </button>
         ))}
       </div>
@@ -338,7 +400,7 @@ export function AttendancePage() {
             </>
           )}
         </>
-      ) : (
+      ) : mode === "batch" ? (
         /* ── Batch mode ─────────────────────────────────────────────────────── */
         <>
           {batches.length === 0 && !loading ? (
@@ -438,6 +500,163 @@ export function AttendancePage() {
             </>
           )}
         </>
+      ) : (
+        /* ── Live Session mode ──────────────────────────────────────────────── */
+        <div className="space-y-6">
+          {!activeSession ? (
+            <div className="bg-card border border-border rounded-xl p-6 space-y-4 max-w-lg">
+              <h3 className="font-semibold text-foreground text-base flex items-center gap-2">
+                <Radio className="w-4 h-4 text-red-500" /> Start Live Attendance
+              </h3>
+              <p className="text-sm text-muted-foreground">Students in the selected batch will be notified and can mark their own attendance within the time window.</p>
+              <div className="space-y-3">
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground mb-1 block">Batch</label>
+                  <select
+                    value={liveBatchId || ""}
+                    onChange={e => setLiveBatchId(e.target.value)}
+                    className="w-full px-3 py-2 text-sm rounded-md border border-border bg-background"
+                  >
+                    <option value="">Select a batch…</option>
+                    {batches.map((b: any) => <option key={b.id} value={b.id}>{b.name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground mb-1 block">Course</label>
+                  <select
+                    value={liveCourseId || ""}
+                    onChange={e => setLiveCourseId(e.target.value)}
+                    className="w-full px-3 py-2 text-sm rounded-md border border-border bg-background"
+                  >
+                    <option value="">Select a course…</option>
+                    {courses.map(c => <option key={c.id} value={c.id}>{c.title}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground mb-1 block">Duration (minutes)</label>
+                  <select
+                    value={liveDuration}
+                    onChange={e => setLiveDuration(Number(e.target.value))}
+                    className="w-full px-3 py-2 text-sm rounded-md border border-border bg-background"
+                  >
+                    {[5, 10, 15, 20].map(d => <option key={d} value={d}>{d} minutes</option>)}
+                  </select>
+                </div>
+              </div>
+              <Button onClick={startLiveSession} disabled={liveStarting} className="w-full">
+                {liveStarting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Radio className="w-4 h-4 mr-2" />}
+                Open Attendance Window
+              </Button>
+              {pastSessions.length > 0 && (
+                <div className="pt-2 border-t border-border">
+                  <p className="text-xs font-medium text-muted-foreground mb-2">Recent Sessions</p>
+                  <div className="space-y-1.5">
+                    {pastSessions.slice(0, 5).map((s: any) => (
+                      <button
+                        key={s.id}
+                        onClick={() => { setActiveSession(s); loadSessionResults(s.id); }}
+                        className="w-full text-left px-3 py-2 text-sm rounded-lg hover:bg-accent/40 border border-border"
+                      >
+                        <span className="font-medium">{s.courses?.title}</span>
+                        <span className="text-muted-foreground"> · {s.batches?.name} · {s.date}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-4 max-w-2xl">
+              {/* Session header */}
+              <div className="bg-card border border-border rounded-xl p-5 flex items-center justify-between gap-4">
+                <div>
+                  <div className="flex items-center gap-2 mb-1">
+                    {timeRemaining > 0
+                      ? <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-semibold bg-green-500/15 text-green-600"><span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />Live</span>
+                      : <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-semibold bg-muted text-muted-foreground">Closed</span>}
+                    <span className="text-sm font-semibold text-foreground">{sessionResults?.session?.courses?.title}</span>
+                    <span className="text-sm text-muted-foreground">· {sessionResults?.session?.batches?.name}</span>
+                  </div>
+                  {timeRemaining > 0 && (
+                    <p className="text-xs text-muted-foreground">
+                      Closes in {Math.floor(timeRemaining / 60)}m {timeRemaining % 60}s
+                    </p>
+                  )}
+                </div>
+                <div className="flex gap-2">
+                  <Button size="sm" variant="outline" onClick={() => loadSessionResults(activeSession.id)} disabled={sessionResultsLoading}>
+                    <RefreshCw className={`w-3.5 h-3.5 ${sessionResultsLoading ? "animate-spin" : ""}`} />
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={() => { setActiveSession(null); setSessionResults(null); if (pollRef.current) clearInterval(pollRef.current); }}>
+                    Back
+                  </Button>
+                </div>
+              </div>
+
+              {/* Stats */}
+              {sessionResults && (
+                <>
+                  <div className="grid grid-cols-3 gap-3">
+                    <StatCard
+                      title="Total Students"
+                      value={String(sessionResults.session?.batches?.batch_students?.length ?? 0)}
+                      icon={Users}
+                      trend={{ value: "In batch", isPositive: true }}
+                    />
+                    <StatCard
+                      title="Marked Present"
+                      value={String(sessionResults.responses.length)}
+                      icon={CheckCircle}
+                      trend={{ value: `${sessionResults.session?.batches?.batch_students?.length > 0 ? Math.round((sessionResults.responses.length / sessionResults.session.batches.batch_students.length) * 100) : 0}%`, isPositive: true }}
+                    />
+                    <StatCard
+                      title="Not Marked"
+                      value={String(Math.max(0, (sessionResults.session?.batches?.batch_students?.length ?? 0) - sessionResults.responses.length))}
+                      icon={XCircle}
+                      trend={{ value: "Absent", isPositive: false }}
+                    />
+                  </div>
+
+                  {/* Student list */}
+                  <div className="bg-card border border-border rounded-xl overflow-hidden">
+                    <div className="px-5 py-3 border-b border-border">
+                      <h4 className="text-sm font-semibold text-foreground">Student Responses</h4>
+                    </div>
+                    <div className="divide-y divide-border">
+                      {(sessionResults.session?.batches?.batch_students || []).map((bs: any) => {
+                        const student = bs.profiles;
+                        const response = sessionResults.responses.find((r: any) => r.student_id === student?.id);
+                        return (
+                          <div key={student?.id} className="flex items-center gap-3 px-5 py-3">
+                            <div className="w-8 h-8 rounded-full bg-[var(--gold-muted)] flex items-center justify-center shrink-0">
+                              <span className="text-xs font-bold text-[var(--gold)]">{(student?.name || "?").charAt(0).toUpperCase()}</span>
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium text-foreground truncate">{student?.name}</p>
+                              <p className="text-xs text-muted-foreground truncate">{student?.email}</p>
+                            </div>
+                            {response ? (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold bg-[var(--gold-muted)] text-[var(--gold)] border border-[var(--gold)]/30">
+                                <CheckCircle className="w-3.5 h-3.5" /> Present
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold bg-red-500/10 text-red-600 border border-red-200">
+                                <XCircle className="w-3.5 h-3.5" /> Not Marked
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })}
+                      {(sessionResults.session?.batches?.batch_students || []).length === 0 && (
+                        <div className="py-10 text-center text-sm text-muted-foreground">No students in this batch.</div>
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+        </div>
       )}
     </div>
   );
