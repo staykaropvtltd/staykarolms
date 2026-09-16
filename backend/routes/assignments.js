@@ -421,6 +421,15 @@ router.delete(
         }
       }
 
+      // Delete dependent submissions first — assignment_submissions.assignment_id has
+      // no ON DELETE CASCADE, so deleting an assignment with existing submissions would
+      // otherwise fail with a raw FK-violation error from Postgres.
+      const { error: subErr } = await supabase
+        .from("assignment_submissions")
+        .delete()
+        .eq("assignment_id", req.params.id);
+      if (subErr) return res.status(500).json({ error: "Failed to delete submissions: " + subErr.message });
+
       // Delete assignment
       const { error } = await supabase
         .from("assignments")
@@ -428,6 +437,13 @@ router.delete(
         .eq("id", req.params.id);
 
       if (error) return res.status(400).json({ error: error.message });
+
+      try {
+        await logAudit(req, req.user, "assignment_delete", "assignments", req.params.id, "warn", "success", { title: assignment?.title });
+      } catch (aErr) {
+        console.error("[assignments] delete audit error:", aErr.message);
+      }
+
       return res.json({ data: { message: "Assignment deleted" } });
     } catch (err) {
       return next(err);

@@ -796,6 +796,12 @@ export const createAssignment = (payload: {
   max_marks?: number;
 }) => apiFetch("/api/assignments", { method: "POST", body: JSON.stringify(payload) });
 
+export const updateAssignment = (id: string, payload: Record<string, unknown>) =>
+  apiFetch(`/api/assignments/${id}`, { method: "PUT", body: JSON.stringify(payload) });
+
+export const deleteAssignment = (id: string) =>
+  apiFetch(`/api/assignments/${id}`, { method: "DELETE" });
+
 export const submitAssignment = (id: string, file_url: string) =>
   apiFetch(`/api/assignments/${id}/submit`, {
     method: "POST",

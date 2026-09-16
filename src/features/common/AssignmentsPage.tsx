@@ -1,11 +1,11 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router";
-import { ClipboardList, FilePlus2, X, Search, Loader2, AlertCircle, Upload, CheckCircle2, FileUp } from "lucide-react";
+import { ClipboardList, FilePlus2, X, Search, Loader2, AlertCircle, Upload, CheckCircle2, FileUp, Edit2, Trash2 } from "lucide-react";
 import type { UserType } from "@/shared/userTypes";
 import { PageHeader } from "@/shared/components/PageHeader";
 import { StatCard } from "@/shared/components/StatCard";
 import { Button } from "@/shared/components/ui/button";
-import { getAssignments, createAssignment, submitAssignment, getCourses, getStudentSubmissions, uploadFile } from "@/shared/lib/api";
+import { getAssignments, createAssignment, updateAssignment, deleteAssignment, submitAssignment, getCourses, getStudentSubmissions, uploadFile } from "@/shared/lib/api";
 import { supabase } from "@/shared/lib/supabase";
 import { useAuth } from "@/shared/context/AuthContext";
 import { toast } from "sonner";
@@ -20,6 +20,7 @@ interface ApiAssignment {
   id: string;
   title: string;
   description?: string;
+  course_id?: string | null;
   due_date?: string;
   max_marks?: number;
   status?: string;
@@ -156,6 +157,122 @@ function CreateAssignmentModal({ onClose, onCreated }: { onClose: () => void; on
           <Button className="flex-1" onClick={handleCreate} disabled={loading || !form.title.trim()}>
             {loading && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
             Create Assignment
+          </Button>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+function EditAssignmentModal({ assignment, onClose, onSaved }: { assignment: ApiAssignment; onClose: () => void; onSaved: () => void }) {
+  const [form, setForm] = useState({
+    title: assignment.title ?? "",
+    description: assignment.description ?? "",
+    due_date: assignment.due_date ? assignment.due_date.slice(0, 10) : "",
+    max_marks: assignment.max_marks ?? 100,
+    course_id: assignment.course_id ?? "",
+  });
+  const [loading, setLoading] = useState(false);
+  const [courses, setCourses] = useState<any[]>([]);
+
+  useEffect(() => {
+    getCourses().then(({ data }) => {
+      const raw = (data as any[]) || [];
+      const normalized = raw.map((item: any) => item.courses ? item.courses : item);
+      setCourses(normalized);
+    });
+  }, []);
+
+  const handleSave = async () => {
+    if (!form.title.trim()) return;
+    setLoading(true);
+    try {
+      const { error } = await updateAssignment(assignment.id, {
+        title: form.title,
+        description: form.description,
+        course_id: form.course_id || null,
+        due_date: toISOSafe(form.due_date),
+        max_marks: form.max_marks,
+      });
+      if (error) toast.error(error);
+      else {
+        toast.success("Assignment updated");
+        onSaved();
+        onClose();
+      }
+    } catch (err: any) {
+      toast.error(err.message || "Failed to update assignment");
+    }
+    setLoading(false);
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+      <div className="bg-card border border-border rounded-xl p-6 w-full max-w-md shadow-xl">
+        <div className="flex items-center justify-between mb-5">
+          <h2 className="text-lg font-semibold text-foreground">Edit Assignment</h2>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground"><X className="w-5 h-5" /></button>
+        </div>
+        <div className="space-y-4">
+          <div>
+            <label className="text-xs font-medium text-muted-foreground">Title *</label>
+            <input
+              value={form.title}
+              onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
+              className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+              placeholder="e.g. Python — OOP Concepts"
+            />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-muted-foreground">Target Course <span className="text-muted-foreground">(optional — leave blank for all students)</span></label>
+            <select
+              value={form.course_id}
+              onChange={e => setForm(f => ({ ...f, course_id: e.target.value }))}
+              className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+            >
+              <option value="">All Students (Institution-wide)</option>
+              {courses.map((c: any) => (
+                <option key={c.id} value={c.id}>{c.title}</option>
+              ))}
+            </select>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs font-medium text-muted-foreground">Due date</label>
+              <input
+                type="date"
+                value={form.due_date}
+                onChange={e => setForm(f => ({ ...f, due_date: e.target.value }))}
+                className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-muted-foreground">Max score</label>
+              <input
+                type="number"
+                value={form.max_marks}
+                onChange={e => setForm(f => ({ ...f, max_marks: Number(e.target.value) }))}
+                className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+              />
+            </div>
+          </div>
+          <div>
+            <label className="text-xs font-medium text-muted-foreground">Description</label>
+            <textarea
+              value={form.description}
+              onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
+              className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm resize-none"
+              rows={3}
+              placeholder="Assignment instructions…"
+            />
+          </div>
+        </div>
+        <div className="flex gap-2 mt-6">
+          <Button className="flex-1" onClick={handleSave} disabled={loading || !form.title.trim()}>
+            {loading && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+            Save Changes
           </Button>
           <Button variant="outline" onClick={onClose}>Cancel</Button>
         </div>
@@ -481,6 +598,8 @@ export function AssignmentsPage({ userType }: AssignmentsPageProps) {
   const [showImport, setShowImport] = useState(false);
   const [submittingId, setSubmittingId] = useState<string | null>(null);
   const [activeCodingAssignment, setActiveCodingAssignment] = useState<ApiAssignment | null>(null);
+  const [editingAssignment, setEditingAssignment] = useState<ApiAssignment | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const fetchAssignments = async () => {
     setLoading(true);
@@ -515,6 +634,16 @@ export function AssignmentsPage({ userType }: AssignmentsPageProps) {
 
   useEffect(() => { fetchAssignments(); }, []);
 
+  const handleDelete = async (id: string, title: string) => {
+    if (!window.confirm(`Delete "${title}"?\n\nThis permanently removes the assignment and all student submissions for it. This action cannot be undone.`)) return;
+    setDeletingId(id);
+    const { error } = await deleteAssignment(id);
+    setDeletingId(null);
+    if (error) { toast.error(error); return; }
+    toast.success(`"${title}" deleted`);
+    fetchAssignments();
+  };
+
   const filtered = assignments.filter(a => {
     const matchSearch = a.title.toLowerCase().includes(search.toLowerCase()) ||
       (a.courses?.title ?? "").toLowerCase().includes(search.toLowerCase());
@@ -540,6 +669,13 @@ export function AssignmentsPage({ userType }: AssignmentsPageProps) {
     <div className="p-8">
       {showModal && <CreateAssignmentModal onClose={() => setShowModal(false)} onCreated={fetchAssignments} />}
       {showImport && <ImportAssignmentsModal onClose={() => setShowImport(false)} onCreated={fetchAssignments} />}
+      {editingAssignment && (
+        <EditAssignmentModal
+          assignment={editingAssignment}
+          onClose={() => setEditingAssignment(null)}
+          onSaved={fetchAssignments}
+        />
+      )}
       {submittingId && (
         <SubmitAssignmentModal
           assignmentId={submittingId}
@@ -650,6 +786,19 @@ export function AssignmentsPage({ userType }: AssignmentsPageProps) {
                           Grade ({a.assignment_submissions?.[0]?.count ?? 0})
                         </Button>
                         <Button size="sm" variant="outline" onClick={() => navigate("/faculty/assignment-review")}>Review</Button>
+                        <button
+                          onClick={() => setEditingAssignment(a)}
+                          title="Edit assignment"
+                          className="p-1.5 hover:bg-primary/10 hover:text-primary rounded-lg text-muted-foreground transition-colors">
+                          <Edit2 className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => handleDelete(a.id, a.title)}
+                          disabled={deletingId === a.id}
+                          title="Delete assignment"
+                          className="p-1.5 hover:bg-red-500/10 hover:text-red-500 rounded-lg text-muted-foreground transition-colors disabled:opacity-40">
+                          {deletingId === a.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                        </button>
                       </>
                     )}
                   </div>

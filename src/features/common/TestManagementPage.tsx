@@ -58,7 +58,7 @@ export function TestManagementPage({ userType }: TestManagementPageProps) {
       <AnimatePresence mode="wait">
         {activeTab === "all" ? (
           <motion.div key="all" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.2 }}>
-            <AllTestsTab />
+            <AllTestsTab userType={userType} />
           </motion.div>
         ) : (
           <motion.div key="create" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.2 }}>
@@ -877,7 +877,7 @@ function ForceDeleteModal({
 
 // ── All Tests Tab ─────────────────────────────────────────────────────────────
 
-function AllTestsTab() {
+function AllTestsTab({ userType }: { userType: "admin" | "faculty" }) {
   const [filterType,    setFilterType]    = useState("all");
   const [showArchived,  setShowArchived]  = useState(false);
   const [tests,         setTests]         = useState<any[]>([]);
@@ -1105,6 +1105,16 @@ function AllTestsTab() {
                                   ? <Loader2 className="w-4 h-4 animate-spin" />
                                   : <Archive className="w-4 h-4" />}
                               </button>
+                              {/* Draft tests were never published and have no attempts yet —
+                                  let admins delete them outright instead of forcing archive-then-force-delete. */}
+                              {userType === "admin" && test.status === "draft" && (
+                                <button
+                                  onClick={() => setForceTarget(test)}
+                                  title="Delete draft"
+                                  className="p-1.5 hover:bg-red-500/10 hover:text-red-500 rounded-lg text-muted-foreground transition-colors">
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              )}
                             </>
                           ) : (
                             // ── Archived test actions ──
