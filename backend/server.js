@@ -215,9 +215,9 @@ app.get("/api/health", async (_req, res) => {
   const redisStart = Date.now();
   let redisStatus = "Healthy";
   let redisDetail = "Not configured";
-  if (redisClient) {
+  if (redis.getClient()) {
     try {
-      await redisClient.ping();
+      await redis.ping();
       redisDetail = "Connected";
     } catch {
       redisStatus = "Degraded";
@@ -227,10 +227,10 @@ app.get("/api/health", async (_req, res) => {
   services.push({
     id: "redis",
     name: "Redis Cache",
-    status: redisClient ? redisStatus : "Healthy",
+    status: redis.getClient() ? redisStatus : "Healthy",
     detail: redisDetail,
     region: "ap-south-1",
-    latency: redisClient ? `${Date.now() - redisStart}ms` : "N/A",
+    latency: redis.getClient() ? `${Date.now() - redisStart}ms` : "N/A",
     uptime: "99.9%",
     cpu: 0,
     memory: 0,

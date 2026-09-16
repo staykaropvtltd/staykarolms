@@ -3,6 +3,11 @@ const supabase = require("../lib/supabase");
 const authenticate = require("../middleware/auth");
 
 // GET /api/upload/retrieve — secure file retrieval
+// NOTE: All three buckets (uploads, profiles, course-content) are configured as PUBLIC.
+// Signed URLs are a convenience wrapper; the files are reachable via direct public URL.
+// True per-file ownership enforcement requires institution-scoped upload paths
+// (e.g. {institution_id}/folder/file.ext) which is a future migration task.
+// This endpoint is authenticated, so unauthenticated actors still cannot use it.
 router.get("/retrieve", authenticate, async (req, res, next) => {
   const { path, bucket } = req.query;
 

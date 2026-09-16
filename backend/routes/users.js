@@ -43,6 +43,18 @@ router.delete("/bulk", authenticate, requireRole("admin", "super-admin"), async 
     return res.status(400).json({ error: "Maximum 50 IDs per request" });
 
   try {
+    // Verify every requested ID belongs to this institution before deleting
+    if (req.user.role !== "super-admin") {
+      const { data: profiles } = await supabase
+        .from("profiles")
+        .select("id, institution_id")
+        .in("id", ids);
+      const outsiders = (profiles || []).filter((p) => p.institution_id !== req.user.institution_id);
+      if (outsiders.length > 0) {
+        return res.status(403).json({ error: "Some users do not belong to your institution" });
+      }
+    }
+
     let deleted = 0;
     for (let i = 0; i < ids.length; i += 10) {
       const chunk = ids.slice(i, i + 10);
@@ -189,7 +201,10 @@ router.post(
           email,
           name,
           role,
-          institution_id: institution_id || req.user.institution_id,
+          // super-admin may specify any institution; everyone else is locked to their own
+          institution_id: req.user.role === "super-admin"
+            ? (institution_id || req.user.institution_id)
+            : req.user.institution_id,
         })
         .select()
         .single();
@@ -524,6 +539,18 @@ router.put("/:id", authenticate, async (req, res, next) => {
   const { name, avatar_url, status } = req.body;
 
   try {
+    // When editing another user's profile, verify they belong to the same institution
+    if (req.user.id !== req.params.id && req.user.role !== "super-admin") {
+      const { data: target } = await supabase
+        .from("profiles")
+        .select("institution_id")
+        .eq("id", req.params.id)
+        .single();
+      if (!target || target.institution_id !== req.user.institution_id) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+    }
+
     const updates = {};
     if (name !== undefined) updates.name = name;
     if (avatar_url !== undefined) updates.avatar_url = avatar_url;
@@ -550,6 +577,18 @@ router.delete(
   requireRole("admin", "faculty", "super-admin"),
   async (req, res, next) => {
     try {
+      // Verify the target user belongs to this institution before deleting
+      if (req.user.role !== "super-admin") {
+        const { data: target } = await supabase
+          .from("profiles")
+          .select("institution_id")
+          .eq("id", req.params.id)
+          .single();
+        if (!target || target.institution_id !== req.user.institution_id) {
+          return res.status(403).json({ error: "Forbidden" });
+        }
+      }
+
       const { error } = await supabase.auth.admin.deleteUser(req.params.id);
       if (error) return res.status(400).json({ error: error.message });
       return res.json({ data: { message: "User deleted" } });

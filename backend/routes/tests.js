@@ -168,6 +168,14 @@ router.get(
   requireRole("admin", "faculty", "super-admin"),
   async (req, res, next) => {
     try {
+      // Verify the test belongs to the user's institution before exposing attempt data
+      let testQuery = supabase.from("tests").select("id").eq("id", req.params.id);
+      if (req.user.role !== "super-admin") {
+        testQuery = testQuery.eq("institution_id", req.user.institution_id);
+      }
+      const { data: test, error: testError } = await testQuery.single();
+      if (testError || !test) return res.status(404).json({ error: "Test not found" });
+
       let query = supabase
         .from("test_attempts")
         .select(`
@@ -562,6 +570,14 @@ router.post(
     }
 
     try {
+      // Verify the test belongs to the user's institution before inserting a question
+      let testQuery = supabase.from("tests").select("id").eq("id", req.params.id);
+      if (req.user.role !== "super-admin") {
+        testQuery = testQuery.eq("institution_id", req.user.institution_id);
+      }
+      const { data: test, error: testError } = await testQuery.single();
+      if (testError || !test) return res.status(404).json({ error: "Test not found" });
+
       const { data, error } = await supabase
         .from("test_questions")
         .insert({

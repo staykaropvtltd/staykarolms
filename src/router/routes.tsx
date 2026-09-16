@@ -3,6 +3,9 @@ import { createBrowserRouter, Navigate } from "react-router";
 import { DashboardLayout } from "@/shared/layouts/DashboardLayout";
 import { ProtectedRoute } from "./ProtectedRoute";
 
+// Landing
+import { LandingPage } from "@/features/landing/LandingPage";
+
 // Auth
 import { LoginPage } from "@/features/auth/LoginPage";
 
@@ -72,10 +75,10 @@ export const router = createBrowserRouter([
     element: <CertificateView />,
   },
 
-  // ── Root redirect ────────────────────────────────────────────────────────────
+  // ── Landing page ─────────────────────────────────────────────────────────────
   {
     path: "/",
-    element: <Navigate to="/login" replace />,
+    element: <LandingPage />,
   },
 
   // ── Super Admin ──────────────────────────────────────────────────────────────

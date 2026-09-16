@@ -67,7 +67,10 @@ router.get("/:id", authenticate, async (req, res, next) => {
 
     if (error || !data) return res.status(404).json({ error: "Ticket not found" });
 
-    // Verify access: staff (admin/super-admin) or ticket owner
+    // Verify access: super-admin sees all; admin sees own institution; others see own tickets
+    if (req.user.role === "admin" && data.institution_id !== req.user.institution_id) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
     if (req.user.role !== "super-admin" && req.user.role !== "admin" && data.raised_by !== req.user.id) {
       return res.status(403).json({ error: "Forbidden" });
     }
@@ -134,6 +137,9 @@ router.get("/:id/messages", authenticate, async (req, res, next) => {
 
     if (!ticket) return res.status(404).json({ error: "Ticket not found" });
 
+    if (req.user.role === "admin" && ticket.institution_id !== req.user.institution_id) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
     if (req.user.role !== "super-admin" && req.user.role !== "admin" && ticket.raised_by !== req.user.id) {
       return res.status(403).json({ error: "Forbidden" });
     }
@@ -165,7 +171,10 @@ router.post("/:id/messages", authenticate, async (req, res, next) => {
 
     if (!ticket) return res.status(404).json({ error: "Ticket not found" });
 
-    // Only staff or ticket owner can post
+    // Only staff or ticket owner can post; admin is limited to their own institution
+    if (req.user.role === "admin" && ticket.institution_id !== req.user.institution_id) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
     if (req.user.role !== "super-admin" && req.user.role !== "admin" && ticket.raised_by !== req.user.id) {
       return res.status(403).json({ error: "Forbidden" });
     }

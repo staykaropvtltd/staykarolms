@@ -4,6 +4,19 @@ const authenticate = require("../middleware/auth");
 const { requireRole } = require("../middleware/roleGuard");
 const { logAudit } = require("../lib/audit");
 
+// Confirm a course exists and belongs to the requesting user's institution.
+// super-admin bypasses the institution check. Returns the course row or null.
+async function verifyCourseAccess(courseId, user) {
+  if (user.role === "super-admin") return { id: courseId };
+  const { data } = await supabase
+    .from("courses")
+    .select("id")
+    .eq("id", courseId)
+    .eq("institution_id", user.institution_id)
+    .single();
+  return data || null;
+}
+
 // GET /api/courses — list by institution
 router.get("/", authenticate, async (req, res, next) => {
   try {
@@ -230,6 +243,9 @@ router.get(
   requireRole("admin", "faculty", "super-admin"),
   async (req, res, next) => {
     try {
+      const course = await verifyCourseAccess(req.params.id, req.user);
+      if (!course) return res.status(404).json({ error: "Course not found" });
+
       const { data, error } = await supabase
         .from("enrollments")
         .select("*, profiles:student_id(name, email, avatar_url)")
@@ -272,6 +288,9 @@ router.get("/:id", authenticate, async (req, res, next) => {
 // GET /api/courses/:id/content — list content items for a course
 router.get("/:id/content", authenticate, async (req, res, next) => {
   try {
+    const course = await verifyCourseAccess(req.params.id, req.user);
+    if (!course) return res.status(404).json({ error: "Course not found" });
+
     const { data, error } = await supabase
       .from("course_content")
       .select("*")
@@ -288,6 +307,9 @@ router.get("/:id/content", authenticate, async (req, res, next) => {
 // GET /api/courses/:id/modules — list modules for a course
 router.get("/:id/modules", authenticate, async (req, res, next) => {
   try {
+    const course = await verifyCourseAccess(req.params.id, req.user);
+    if (!course) return res.status(404).json({ error: "Course not found" });
+
     const { data, error } = await supabase
       .from("course_modules")
       .select("*")
@@ -311,6 +333,9 @@ router.post(
     if (!title) return res.status(400).json({ error: "title is required" });
 
     try {
+      const course = await verifyCourseAccess(req.params.id, req.user);
+      if (!course) return res.status(404).json({ error: "Course not found" });
+
       const { data, error } = await supabase
         .from("course_modules")
         .insert({
@@ -338,6 +363,9 @@ router.put(
     const { title } = req.body;
     if (!title) return res.status(400).json({ error: "title is required" });
     try {
+      const course = await verifyCourseAccess(req.params.courseId, req.user);
+      if (!course) return res.status(404).json({ error: "Course not found" });
+
       const { data, error } = await supabase
         .from("course_modules")
         .update({ title })
@@ -360,6 +388,9 @@ router.delete(
   requireRole("admin", "faculty", "super-admin"),
   async (req, res, next) => {
     try {
+      const course = await verifyCourseAccess(req.params.courseId, req.user);
+      if (!course) return res.status(404).json({ error: "Course not found" });
+
       await supabase.from("course_content").delete().eq("module_id", req.params.moduleId);
       const { error } = await supabase
         .from("course_modules")
@@ -382,6 +413,9 @@ router.delete(
   async (req, res, next) => {
     try {
       const { courseId, contentId } = req.params;
+
+      const course = await verifyCourseAccess(courseId, req.user);
+      if (!course) return res.status(404).json({ error: "Course not found" });
 
       // Fetch the content record to get the stored URL (for storage cleanup)
       const { data: contentItem, error: fetchError } = await supabase
@@ -442,6 +476,9 @@ router.post(
     if (!title || !type) return res.status(400).json({ error: "title and type are required" });
 
     try {
+      const course = await verifyCourseAccess(req.params.id, req.user);
+      if (!course) return res.status(404).json({ error: "Course not found" });
+
       const { data, error } = await supabase
         .from("course_content")
         .insert({
@@ -475,6 +512,9 @@ router.post(
     try {
       const { courseId, contentId } = req.params;
       const studentId = req.user.id;
+
+      const course = await verifyCourseAccess(courseId, req.user);
+      if (!course) return res.status(404).json({ error: "Course not found" });
 
       // 1. Insert completion record (ignores duplicate key if already completed)
       const { error: completeErr } = await supabase

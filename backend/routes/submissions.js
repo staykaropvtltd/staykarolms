@@ -34,7 +34,23 @@ router.get(
         const assignmentIds = (myAssignments || []).map((a) => a.id);
         if (assignmentIds.length === 0) return res.json({ data: [] });
         query = query.in("assignment_id", assignmentIds);
+      } else if (req.user.role === "admin") {
+        // assignments have no institution_id — scope via creator membership
+        const { data: members } = await supabase
+          .from("profiles")
+          .select("id")
+          .eq("institution_id", req.user.institution_id);
+        const memberIds = (members || []).map((m) => m.id);
+        if (memberIds.length === 0) return res.json({ data: [] });
+        const { data: instAssignments } = await supabase
+          .from("assignments")
+          .select("id")
+          .in("created_by", memberIds);
+        const assignmentIds = (instAssignments || []).map((a) => a.id);
+        if (assignmentIds.length === 0) return res.json({ data: [] });
+        query = query.in("assignment_id", assignmentIds);
       }
+      // super-admin: no filter
 
       // Optional filter by status
       if (req.query.status === "pending") {

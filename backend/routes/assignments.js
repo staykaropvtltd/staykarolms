@@ -32,7 +32,17 @@ router.get("/", authenticate, async (req, res, next) => {
       }
     } else if (req.user.role === "faculty") {
       query = query.eq("created_by", req.user.id);
+    } else if (req.user.role === "admin") {
+      // assignments have no institution_id — scope by the creator's institution
+      const { data: members } = await supabase
+        .from("profiles")
+        .select("id")
+        .eq("institution_id", req.user.institution_id);
+      const memberIds = (members || []).map((m) => m.id);
+      if (memberIds.length === 0) return res.json({ data: [] });
+      query = query.in("created_by", memberIds);
     }
+    // super-admin: no filter
 
     const { data, error } = await query.order("created_at", { ascending: false });
     if (error) return res.status(400).json({ error: error.message });
@@ -57,6 +67,18 @@ router.get("/:id", authenticate, async (req, res, next) => {
       .single();
 
     if (error || !data) return res.status(404).json({ error: "Assignment not found" });
+
+    // Admin: verify assignment creator is in the same institution
+    if (req.user.role === "admin") {
+      const { data: creator } = await supabase
+        .from("profiles")
+        .select("institution_id")
+        .eq("id", data.created_by)
+        .single();
+      if (!creator || creator.institution_id !== req.user.institution_id) {
+        return res.status(404).json({ error: "Assignment not found" });
+      }
+    }
 
     if (req.user.role !== "super-admin" && req.user.role !== "admin" && req.user.role !== "faculty") {
       if (data.course_id) {
@@ -280,6 +302,29 @@ router.put(
   requireRole("admin", "faculty", "super-admin"),
   async (req, res, next) => {
     try {
+      // Verify access: faculty own it, admin scoped by institution
+      if (req.user.role !== "super-admin") {
+        const { data: existing } = await supabase
+          .from("assignments")
+          .select("id, created_by")
+          .eq("id", req.params.id)
+          .single();
+        if (!existing) return res.status(404).json({ error: "Assignment not found" });
+        if (req.user.role === "faculty" && existing.created_by !== req.user.id) {
+          return res.status(403).json({ error: "Forbidden" });
+        }
+        if (req.user.role === "admin") {
+          const { data: creator } = await supabase
+            .from("profiles")
+            .select("institution_id")
+            .eq("id", existing.created_by)
+            .single();
+          if (!creator || creator.institution_id !== req.user.institution_id) {
+            return res.status(403).json({ error: "Forbidden" });
+          }
+        }
+      }
+
       const { due_date, ...updateData } = req.body;
       const { data, error } = await supabase
         .from("assignments")
@@ -338,6 +383,18 @@ router.delete(
       // Faculty can only delete their own assignments
       if (req.user.role === "faculty" && assignment?.created_by !== req.user.id) {
         return res.status(403).json({ error: "Forbidden" });
+      }
+
+      // Admin can only delete assignments belonging to their institution
+      if (req.user.role === "admin" && assignment) {
+        const { data: creator } = await supabase
+          .from("profiles")
+          .select("institution_id")
+          .eq("id", assignment.created_by)
+          .single();
+        if (!creator || creator.institution_id !== req.user.institution_id) {
+          return res.status(403).json({ error: "Forbidden" });
+        }
       }
 
       // Delete associated calendar event

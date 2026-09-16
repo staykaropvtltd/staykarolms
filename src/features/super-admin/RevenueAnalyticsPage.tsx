@@ -57,12 +57,13 @@ export function RevenueAnalyticsPage() {
     cohorts[quarter] = (cohorts[quarter] || 0) + 1;
   });
 
+  // Retention periods not tracked — show null (displayed as "—") until churn data is available
   const cohortData = Object.keys(cohorts).map(cohort => ({
     cohort,
     tenants: cohorts[cohort],
-    retained3m: cohorts[cohort],
-    retained6m: cohorts[cohort],
-    retained12m: cohorts[cohort],
+    retained3m: null as number | null,
+    retained6m: null as number | null,
+    retained12m: null as number | null,
   }));
 
   // Historical charts data built from registration dates
@@ -203,7 +204,7 @@ export function RevenueAnalyticsPage() {
           <div className="bg-card border border-border rounded-xl overflow-hidden">
             <div className="px-6 py-4 border-b border-border">
               <h2 className="font-semibold text-foreground">Cohort Retention</h2>
-              <p className="text-xs text-muted-foreground mt-0.5">Tenant retention by quarterly cohort</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Tenant retention by quarterly cohort — churn tracking not yet instrumented</p>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">

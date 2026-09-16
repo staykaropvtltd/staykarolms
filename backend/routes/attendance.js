@@ -96,6 +96,17 @@ router.get(
   requireRole("faculty", "admin", "super-admin"),
   async (req, res, next) => {
     try {
+      // Verify the course belongs to the user's institution before exposing attendance
+      if (req.user.role !== "super-admin") {
+        const { data: course } = await supabase
+          .from("courses")
+          .select("id")
+          .eq("id", req.params.id)
+          .eq("institution_id", req.user.institution_id)
+          .single();
+        if (!course) return res.status(404).json({ error: "Course not found" });
+      }
+
       const { data, error } = await supabase
         .from("attendance")
         .select("*, profiles:student_id(name, avatar_url)")
@@ -210,11 +221,19 @@ router.get(
     try {
       const { data: session, error: sError } = await supabase
         .from("live_attendance_sessions")
-        .select("*, batches:batch_id(name, batch_students(student_id, profiles:student_id(id, name, email))), courses:course_id(title)")
+        .select("*, batches:batch_id(name, institution_id, batch_students(student_id, profiles:student_id(id, name, email))), courses:course_id(title)")
         .eq("id", req.params.id)
         .single();
 
       if (sError) return res.status(400).json({ error: sError.message });
+
+      // Verify access: faculty can only see their own sessions; admin must share the institution
+      if (req.user.role === "faculty" && session.faculty_id !== req.user.id) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+      if (req.user.role === "admin" && session.batches?.institution_id !== req.user.institution_id) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
 
       const { data: responses } = await supabase
         .from("live_attendance_responses")

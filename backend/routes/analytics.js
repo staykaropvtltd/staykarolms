@@ -114,6 +114,109 @@ router.get("/faculty", authenticate, requireRole("faculty"), async (req, res, ne
   }
 });
 
+// GET /api/analytics/faculty/students — per-student performance for faculty's courses
+router.get("/faculty/students", authenticate, requireRole("faculty", "admin"), async (req, res, next) => {
+  try {
+    // Get courses this faculty member owns (admin sees all institution courses)
+    let courseQuery = supabase.from("courses").select("id, title");
+    if (req.user.role === "faculty") {
+      courseQuery = courseQuery.eq("faculty_id", req.user.id);
+    } else {
+      courseQuery = courseQuery.eq("institution_id", req.user.institution_id);
+    }
+    const { data: courses } = await courseQuery;
+    const courseIds = (courses || []).map((c) => c.id);
+    const courseMap = Object.fromEntries((courses || []).map((c) => [c.id, c.title]));
+
+    if (courseIds.length === 0) return res.json({ data: [] });
+
+    // Get all enrollments for these courses
+    const { data: enrollments } = await supabase
+      .from("enrollments")
+      .select("student_id, course_id, profiles:student_id(id, name, email, last_seen_at)")
+      .in("course_id", courseIds);
+
+    if (!enrollments || enrollments.length === 0) return res.json({ data: [] });
+
+    // Collect unique student IDs
+    const studentIds = [...new Set(enrollments.map((e) => e.student_id))];
+
+    // Get submissions for these students on these courses' assignments
+    const [{ data: submissions }, { data: attendance }] = await Promise.all([
+      supabase
+        .from("assignment_submissions")
+        .select("student_id, grade, submitted_at, assignments:assignment_id(course_id)")
+        .in("student_id", studentIds),
+      supabase
+        .from("attendance")
+        .select("student_id, status, course_id")
+        .in("student_id", studentIds)
+        .in("course_id", courseIds),
+    ]);
+
+    // Build per-student aggregates
+    const studentMap = {};
+    for (const e of enrollments) {
+      const sid = e.student_id;
+      if (!studentMap[sid]) {
+        studentMap[sid] = {
+          id: sid,
+          name: e.profiles?.name || "Unknown",
+          email: e.profiles?.email || "",
+          lastSeenAt: e.profiles?.last_seen_at || null,
+          courses: [],
+          grades: [],
+          presentDays: 0,
+          totalDays: 0,
+        };
+      }
+      if (!studentMap[sid].courses.includes(courseMap[e.course_id])) {
+        studentMap[sid].courses.push(courseMap[e.course_id]);
+      }
+    }
+
+    // Aggregate grades (only for courses owned by this faculty/admin)
+    for (const sub of submissions || []) {
+      const courseId = sub.assignments?.course_id;
+      if (!courseId || !courseIds.includes(courseId)) continue;
+      if (studentMap[sub.student_id] && sub.grade != null) {
+        studentMap[sub.student_id].grades.push(sub.grade);
+      }
+    }
+
+    // Aggregate attendance
+    for (const att of attendance || []) {
+      if (!studentMap[att.student_id]) continue;
+      studentMap[att.student_id].totalDays++;
+      if (att.status === "present") studentMap[att.student_id].presentDays++;
+    }
+
+    const result = Object.values(studentMap).map((s) => {
+      const avgScore = s.grades.length
+        ? Math.round(s.grades.reduce((a, b) => a + b, 0) / s.grades.length)
+        : null;
+      const attendancePct = s.totalDays
+        ? Math.round((s.presentDays / s.totalDays) * 100)
+        : null;
+      return {
+        id: s.id,
+        name: s.name,
+        email: s.email,
+        course: s.courses[0] || "—",
+        assignments: s.grades.length,
+        avgScore,
+        attendance: attendancePct,
+        lastSeenAt: s.lastSeenAt,
+        scores: s.grades.slice(-8),
+      };
+    });
+
+    return res.json({ data: result });
+  } catch (err) {
+    return next(err);
+  }
+});
+
 // GET /api/analytics/admin — institution overview
 router.get(
   "/admin",

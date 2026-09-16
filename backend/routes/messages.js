@@ -92,6 +92,18 @@ router.get("/:userId", authenticate, async (req, res, next) => {
     const otherId = req.params.userId;
     const myId = req.user.id;
 
+    // Verify the other user belongs to the same institution — mirrors the POST guard
+    if (req.user.role !== "super-admin") {
+      const { data: otherUser } = await supabase
+        .from("profiles")
+        .select("institution_id")
+        .eq("id", otherId)
+        .single();
+      if (!otherUser || otherUser.institution_id !== req.user.institution_id) {
+        return res.status(403).json({ error: "Access denied" });
+      }
+    }
+
     const { data, error } = await supabase
       .from("messages")
       .select("*")

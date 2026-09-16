@@ -3,6 +3,19 @@ const supabase = require("../lib/supabase");
 const authenticate = require("../middleware/auth");
 const { requireRole } = require("../middleware/roleGuard");
 
+// Confirm a batch exists and belongs to the requesting user's institution.
+// super-admin bypasses the institution check. Returns the batch row or null.
+async function verifyBatchAccess(batchId, user) {
+  if (user.role === "super-admin") return { id: batchId };
+  const { data } = await supabase
+    .from("batches")
+    .select("id")
+    .eq("id", batchId)
+    .eq("institution_id", user.institution_id)
+    .single();
+  return data || null;
+}
+
 // GET /api/batches — list batches for current institution
 router.get("/", authenticate, async (req, res, next) => {
   try {
@@ -160,6 +173,9 @@ router.delete("/:id", authenticate, requireRole("admin", "super-admin"), async (
 // GET /api/batches/:id/courses — list courses allocated to a batch
 router.get("/:id/courses", authenticate, async (req, res, next) => {
   try {
+    const batch = await verifyBatchAccess(req.params.id, req.user);
+    if (!batch) return res.status(404).json({ error: "Batch not found" });
+
     const { data, error } = await supabase
       .from("batch_courses")
       .select("*, courses:course_id(id, title, description, thumbnail_url, faculty_id, profiles:faculty_id(name))")
@@ -178,6 +194,9 @@ router.post("/:id/courses", authenticate, requireRole("admin", "super-admin"), a
   if (!course_id) return res.status(400).json({ error: "course_id is required" });
 
   try {
+    const batch = await verifyBatchAccess(req.params.id, req.user);
+    if (!batch) return res.status(404).json({ error: "Batch not found" });
+
     // 1+2. Create batch_courses link and fetch current batch students concurrently.
     const [
       { data: bc, error: bcErr },
@@ -215,6 +234,9 @@ router.post("/:id/courses", authenticate, requireRole("admin", "super-admin"), a
 // DELETE /api/batches/:id/courses/:courseId — remove course allocation from batch
 router.delete("/:id/courses/:courseId", authenticate, requireRole("admin", "super-admin"), async (req, res, next) => {
   try {
+    const batch = await verifyBatchAccess(req.params.id, req.user);
+    if (!batch) return res.status(404).json({ error: "Batch not found" });
+
     const { error } = await supabase
       .from("batch_courses")
       .delete()
@@ -231,6 +253,9 @@ router.delete("/:id/courses/:courseId", authenticate, requireRole("admin", "supe
 // DELETE /api/batches/:id/students — remove ALL students from a batch
 router.delete("/:id/students", authenticate, requireRole("admin", "super-admin"), async (req, res, next) => {
   try {
+    const batch = await verifyBatchAccess(req.params.id, req.user);
+    if (!batch) return res.status(404).json({ error: "Batch not found" });
+
     const { error, count } = await supabase
       .from("batch_students")
       .delete({ count: "exact" })
@@ -249,6 +274,9 @@ router.post("/:id/students", authenticate, requireRole("admin", "faculty", "supe
   if (!student_id) return res.status(400).json({ error: "student_id is required" });
 
   try {
+    const batch = await verifyBatchAccess(req.params.id, req.user);
+    if (!batch) return res.status(404).json({ error: "Batch not found" });
+
     const { data, error } = await supabase
       .from("batch_students")
       .insert({ batch_id: req.params.id, student_id })
@@ -279,6 +307,9 @@ router.post("/:id/students", authenticate, requireRole("admin", "faculty", "supe
 // DELETE /api/batches/:id/students/delete-accounts — hard-delete all student accounts in batch
 router.delete("/:id/students/delete-accounts", authenticate, requireRole("admin", "super-admin"), async (req, res, next) => {
   try {
+    const batch = await verifyBatchAccess(req.params.id, req.user);
+    if (!batch) return res.status(404).json({ error: "Batch not found" });
+
     const { data: batchStudents, error } = await supabase
       .from("batch_students")
       .select("student_id")
@@ -304,6 +335,9 @@ router.delete("/:id/students/delete-accounts", authenticate, requireRole("admin"
 // DELETE /api/batches/:id/students/:studentId — remove student from batch
 router.delete("/:id/students/:studentId", authenticate, requireRole("admin", "super-admin"), async (req, res, next) => {
   try {
+    const batch = await verifyBatchAccess(req.params.id, req.user);
+    if (!batch) return res.status(404).json({ error: "Batch not found" });
+
     const { error } = await supabase
       .from("batch_students")
       .delete()
@@ -330,6 +364,9 @@ router.post("/:id/students/bulk", authenticate, requireRole("admin", "super-admi
   }
 
   try {
+    const batch = await verifyBatchAccess(req.params.id, req.user);
+    if (!batch) return res.status(404).json({ error: "Batch not found" });
+
     const { data: profiles, error: profileError } = await supabase
       .from("profiles")
       .select("id, email")
@@ -384,6 +421,9 @@ router.post("/:id/students/bulk", authenticate, requireRole("admin", "super-admi
 // GET /api/batches/:id/faculty — list faculty assigned to a batch
 router.get("/:id/faculty", authenticate, requireRole("admin", "faculty", "super-admin"), async (req, res, next) => {
   try {
+    const batch = await verifyBatchAccess(req.params.id, req.user);
+    if (!batch) return res.status(404).json({ error: "Batch not found" });
+
     const { data, error } = await supabase
       .from("batch_faculty")
       .select("id, assigned_at, profiles:faculty_id(id, name, email, avatar_url)")
@@ -402,6 +442,9 @@ router.post("/:id/faculty", authenticate, requireRole("admin", "super-admin"), a
   if (!faculty_id) return res.status(400).json({ error: "faculty_id is required" });
 
   try {
+    const batch = await verifyBatchAccess(req.params.id, req.user);
+    if (!batch) return res.status(404).json({ error: "Batch not found" });
+
     const { data, error } = await supabase
       .from("batch_faculty")
       .upsert(
@@ -421,6 +464,9 @@ router.post("/:id/faculty", authenticate, requireRole("admin", "super-admin"), a
 // DELETE /api/batches/:id/faculty/:facultyId — remove a faculty member from a batch
 router.delete("/:id/faculty/:facultyId", authenticate, requireRole("admin", "super-admin"), async (req, res, next) => {
   try {
+    const batch = await verifyBatchAccess(req.params.id, req.user);
+    if (!batch) return res.status(404).json({ error: "Batch not found" });
+
     const { error } = await supabase
       .from("batch_faculty")
       .delete()

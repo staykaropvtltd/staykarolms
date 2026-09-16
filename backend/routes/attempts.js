@@ -408,6 +408,19 @@ router.get("/:id/result", authenticate, async (req, res, next) => {
 // POST /api/attempts/:id/grant-retake — admin/faculty grants retake after flagged termination
 router.post("/:id/grant-retake", authenticate, requireRole("admin", "faculty", "super-admin"), async (req, res, next) => {
   try {
+    // Verify the attempt's test belongs to the user's institution before granting retake
+    if (req.user.role !== "super-admin") {
+      const { data: attemptCheck } = await supabase
+        .from("test_attempts")
+        .select("tests:test_id(institution_id)")
+        .eq("id", req.params.id)
+        .single();
+
+      if (!attemptCheck || attemptCheck.tests?.institution_id !== req.user.institution_id) {
+        return res.status(404).json({ error: "Attempt not found" });
+      }
+    }
+
     const { data, error } = await supabase
       .from("test_attempts")
       .update({

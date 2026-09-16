@@ -532,6 +532,8 @@ export const getStudentAnalytics = () => apiFetch("/api/analytics/student");
 
 export const getFacultyAnalytics = () => apiFetch("/api/analytics/faculty");
 
+export const getFacultyStudentPerformance = () => apiFetch("/api/analytics/faculty/students");
+
 export const getAdminAnalytics = () => apiFetch("/api/analytics/admin");
 
 

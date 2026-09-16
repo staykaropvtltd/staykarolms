@@ -16,6 +16,20 @@ router.post(
     }
 
     try {
+      // Verify student and course both belong to requester's institution
+      if (req.user.role !== "super-admin") {
+        const [{ data: studentProfile }, { data: course }] = await Promise.all([
+          supabase.from("profiles").select("institution_id").eq("id", student_id).single(),
+          supabase.from("courses").select("institution_id").eq("id", course_id).single(),
+        ]);
+        if (!studentProfile || studentProfile.institution_id !== req.user.institution_id) {
+          return res.status(403).json({ error: "Student not in your institution" });
+        }
+        if (!course || course.institution_id !== req.user.institution_id) {
+          return res.status(403).json({ error: "Course not in your institution" });
+        }
+      }
+
       // Check if already issued
       const { data: existing } = await supabase
         .from("certificates")
@@ -74,6 +88,29 @@ router.post(
     if (!course_id) return res.status(400).json({ error: "course_id is required" });
 
     try {
+      // Verify course belongs to requester's institution
+      if (req.user.role !== "super-admin") {
+        const { data: course } = await supabase
+          .from("courses")
+          .select("institution_id")
+          .eq("id", course_id)
+          .single();
+        if (!course || course.institution_id !== req.user.institution_id) {
+          return res.status(403).json({ error: "Course not in your institution" });
+        }
+        // If batch_id supplied, verify that batch belongs to this institution too
+        if (batch_id) {
+          const { data: batch } = await supabase
+            .from("batches")
+            .select("institution_id")
+            .eq("id", batch_id)
+            .single();
+          if (!batch || batch.institution_id !== req.user.institution_id) {
+            return res.status(403).json({ error: "Batch not in your institution" });
+          }
+        }
+      }
+
       // Resolve list of student IDs: from batch membership or course enrollments
       let studentIds = [];
       if (batch_id) {

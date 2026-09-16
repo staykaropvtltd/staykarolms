@@ -3,7 +3,7 @@ import { Users, TrendingUp, AlertTriangle, Search, X, Loader2 } from "lucide-rea
 import { PageHeader } from "@/shared/components/PageHeader";
 import { StatCard } from "@/shared/components/StatCard";
 import { Button } from "@/shared/components/ui/button";
-import { getFacultyAnalytics, getUsers } from "@/shared/lib/api";
+import { getFacultyAnalytics, getFacultyStudentPerformance } from "@/shared/lib/api";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line } from "recharts";
 
 export type StudentPerformance = {
@@ -98,12 +98,12 @@ export function StudentPerformancePage() {
     async function load() {
       setLoading(true);
       try {
-        const [statsRes, studentsRes] = await Promise.all([
+        const [statsRes, perfRes] = await Promise.all([
           getFacultyAnalytics(),
-          getUsers("student"),
+          getFacultyStudentPerformance(),
         ]);
         if (statsRes.data) setApiStats(statsRes.data);
-        setStudents(studentsRes.data || []);
+        setStudents(perfRes.data || []);
       } catch (err) {
         console.error("Failed to load student performance analytics", err);
       }
@@ -114,17 +114,26 @@ export function StudentPerformancePage() {
 
   const mappedStudents: StudentPerformance[] = students.map(s => {
     const initials = s.name ? s.name.split(" ").map((n: string) => n[0]).join("").slice(0, 2).toUpperCase() : "S";
+    const score = s.avgScore ?? 0;
+    const att = s.attendance ?? 0;
+    const lastActive = s.lastSeenAt
+      ? new Date(s.lastSeenAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })
+      : "No activity";
+    const status: StudentPerformance["status"] =
+      score >= 85 && att >= 85 ? "Excellent"
+      : att < 75 || (s.assignments > 0 && score < 60) ? "At risk"
+      : "On track";
     return {
       id: s.id,
       name: s.name || "Unknown Student",
       avatar: initials,
-      course: "Enrolled Course",
-      assignments: 0,
-      avgScore: 0,
-      attendance: 100,
-      lastActive: "Active now",
-      status: "On track",
-      scores: [],
+      course: s.course || "—",
+      assignments: s.assignments ?? 0,
+      avgScore: score,
+      attendance: att,
+      lastActive,
+      status,
+      scores: s.scores || [],
     };
   });
 

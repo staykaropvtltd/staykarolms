@@ -131,13 +131,19 @@ router.put(
   async (req, res, next) => {
     try {
       const { scheduled_at, duration_mins, ...updateData } = req.body;
-      const { data, error } = await supabase
+
+      let updateQuery = supabase
         .from("live_classes")
         .update({ scheduled_at, duration_mins, ...updateData })
-        .eq("id", req.params.id)
-        .select()
-        .single();
+        .eq("id", req.params.id);
 
+      if (req.user.role !== "super-admin") {
+        updateQuery = updateQuery.eq("institution_id", req.user.institution_id);
+      }
+
+      const { data, error } = await updateQuery.select().single();
+
+      if (!data && !error) return res.status(404).json({ error: "Live class not found" });
       if (error) return res.status(400).json({ error: error.message });
 
       // Update calendar event if scheduled_at or duration_mins changed
@@ -181,13 +187,18 @@ router.put(
   async (req, res, next) => {
     try {
       // Update class status to "live" which triggers attendance on frontend
-      const { data, error } = await supabase
+      let startQuery = supabase
         .from("live_classes")
         .update({ status: "live" })
-        .eq("id", req.params.id)
-        .select(`*, courses:course_id(title)`)
-        .single();
+        .eq("id", req.params.id);
 
+      if (req.user.role !== "super-admin") {
+        startQuery = startQuery.eq("institution_id", req.user.institution_id);
+      }
+
+      const { data, error } = await startQuery.select(`*, courses:course_id(title)`).single();
+
+      if (!data && !error) return res.status(404).json({ error: "Live class not found" });
       if (error) return res.status(400).json({ error: error.message });
 
       // Send attendance notification
@@ -239,14 +250,19 @@ router.put(
   requireRole("admin", "faculty", "super-admin"),
   async (req, res, next) => {
     try {
-      // 1. Update class status to completed
-      const { data: cls, error: clsErr } = await supabase
+      // 1. Update class status to completed — scoped to institution so cross-tenant end is impossible
+      let endQuery = supabase
         .from("live_classes")
         .update({ status: "completed" })
-        .eq("id", req.params.id)
-        .select()
-        .single();
+        .eq("id", req.params.id);
 
+      if (req.user.role !== "super-admin") {
+        endQuery = endQuery.eq("institution_id", req.user.institution_id);
+      }
+
+      const { data: cls, error: clsErr } = await endQuery.select().single();
+
+      if (!cls && !clsErr) throw new Error("Live class not found");
       if (clsErr) throw new Error(clsErr.message);
 
       // 2. Fetch expected students
@@ -298,6 +314,17 @@ router.put(
   requireRole("admin", "faculty", "super-admin"),
   async (req, res, next) => {
     try {
+      // Verify the live class belongs to the user's institution before overriding attendance
+      if (req.user.role !== "super-admin") {
+        const { data: liveClass } = await supabase
+          .from("live_classes")
+          .select("id")
+          .eq("id", req.params.id)
+          .eq("institution_id", req.user.institution_id)
+          .single();
+        if (!liveClass) return res.status(404).json({ error: "Live class not found" });
+      }
+
       const { status } = req.body;
       const { data, error } = await supabase
         .from("live_class_attendance")
@@ -357,6 +384,17 @@ router.get(
   requireRole("admin", "faculty", "super-admin"),
   async (req, res, next) => {
     try {
+      // Verify the live class belongs to the user's institution
+      if (req.user.role !== "super-admin") {
+        const { data: liveClass } = await supabase
+          .from("live_classes")
+          .select("id")
+          .eq("id", req.params.id)
+          .eq("institution_id", req.user.institution_id)
+          .single();
+        if (!liveClass) return res.status(404).json({ error: "Live class not found" });
+      }
+
       const { data, error } = await supabase
         .from("live_class_attendance")
         .select("*, profiles:student_id(name, email, avatar_url)")
@@ -377,12 +415,19 @@ router.delete(
   requireRole("admin", "faculty", "super-admin"),
   async (req, res, next) => {
     try {
-      // Get live class details before deletion
-      const { data: liveClass } = await supabase
+      // Get live class details before deletion — scoped to institution
+      let detailQuery = supabase
         .from("live_classes")
         .select("title, created_by")
-        .eq("id", req.params.id)
-        .single();
+        .eq("id", req.params.id);
+
+      if (req.user.role !== "super-admin") {
+        detailQuery = detailQuery.eq("institution_id", req.user.institution_id);
+      }
+
+      const { data: liveClass } = await detailQuery.single();
+
+      if (!liveClass) return res.status(404).json({ error: "Live class not found" });
 
       // Delete associated calendar event
       if (liveClass) {
@@ -407,11 +452,17 @@ router.delete(
         }
       }
 
-      // Delete live class
-      const { error } = await supabase
+      // Delete live class — re-scope to institution to prevent TOCTOU race
+      let deleteQuery = supabase
         .from("live_classes")
         .delete()
         .eq("id", req.params.id);
+
+      if (req.user.role !== "super-admin") {
+        deleteQuery = deleteQuery.eq("institution_id", req.user.institution_id);
+      }
+
+      const { error } = await deleteQuery;
 
       if (error) return res.status(400).json({ error: error.message });
       return res.json({ data: { message: "Live class deleted" } });

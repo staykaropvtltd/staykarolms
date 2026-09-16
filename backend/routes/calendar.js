@@ -269,10 +269,17 @@ router.delete(
   requireRole("admin", "faculty", "super-admin"),
   async (req, res, next) => {
     try {
-      const { error } = await supabase
+      let query = supabase
         .from("calendar_events")
         .delete()
         .eq("id", req.params.id);
+
+      // Scope deletion to user's institution — mirrors the PUT guard above
+      if (req.user.role !== "super-admin") {
+        query = query.eq("institution_id", req.user.institution_id);
+      }
+
+      const { error } = await query;
 
       if (error) return res.status(400).json({ error: error.message });
       return res.json({ data: { message: "Event deleted" } });
