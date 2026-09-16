@@ -21,8 +21,14 @@ router.get("/", authenticate, async (req, res, next) => {
         .select("course_id")
         .eq("student_id", req.user.id);
 
-      const courseIds = (enrollments || []).map((e) => e.course_id).filter(Boolean);
-      
+      // Only well-formed UUIDs go into the raw filter string below — a single malformed
+      // course_id (bad data, stray characters) would otherwise break the whole filter
+      // syntax and 400 the entire request instead of just excluding that one row.
+      const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      const courseIds = (enrollments || [])
+        .map((e) => e.course_id)
+        .filter((id) => typeof id === "string" && UUID_RE.test(id));
+
       // Filter: institution-wide (course_id IS NULL) OR enrolled courses
       if (courseIds.length > 0) {
         query = query.or(`course_id.in.(${courseIds.join(",")}),course_id.is.null`);
@@ -45,7 +51,10 @@ router.get("/", authenticate, async (req, res, next) => {
     // super-admin: no filter
 
     const { data, error } = await query.order("created_at", { ascending: false });
-    if (error) return res.status(400).json({ error: error.message });
+    if (error) {
+      console.error("[assignments] list query error:", error.message, "role:", req.user.role, "user:", req.user.id);
+      return res.status(400).json({ error: error.message });
+    }
     return res.json({ data });
   } catch (err) {
     return next(err);
